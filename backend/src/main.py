@@ -709,6 +709,7 @@ def run_batch_processing():
                         # Extrai valores do site
                         investimento = clean_value(current_record.get('Investimento', '0,00'))
                         receita = clean_value(current_record.get('Receita', '0,00'))
+                        roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
                         mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
                         
                         # Verifica alerta de MC negativo (por site individual)
@@ -717,18 +718,31 @@ def run_batch_processing():
                         
                         is_dolar = is_dollar_value(receita)
                         
+                        # Formata valores individuais para log
+                        inv_float = to_float(investimento)
+                        rec_float = to_float(receita)
+                        roas_float = to_float(roas_geral)
+                        mc_individual = to_float(mc_geral)
+                        
+                        inv_str = f"R$ {inv_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                        rec_str = f"R$ {rec_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.') if not is_dolar else f"$ {rec_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                        roas_str = f"{roas_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                        mc_str_individual = f"R$ {mc_individual:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                        
+                        # Log individual do site (detalhado)
+                        db.log_activity(site_name, 'success', f"Inv: {inv_str} | Rec: {rec_str} | ROAS: {roas_str} | MC: {mc_str_individual}")
+                        
                         # Acumula nos totais da squad
-                        squad_investimento += to_float(investimento)
+                        squad_investimento += inv_float
                         if is_dolar:
-                            squad_receita_dolar += to_float(receita)
+                            squad_receita_dolar += rec_float
                         else:
-                            squad_receita_real += to_float(receita)
-                        squad_mc += to_float(mc_geral)
+                            squad_receita_real += rec_float
+                        squad_mc += mc_individual
                         squad_encontrou_registro = True
                         squad_sites_processados.append(site_name)
                     
                     site_processado = True
-                    db.log_activity(site_name, 'success', f"Dados coletados para resumo da squad")
 
                 except Exception as e:
                     retry_count += 1
