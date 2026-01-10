@@ -566,6 +566,7 @@ def run_batch_processing():
     
     # Agrupa sites por webhook (squad)
     webhook_to_sites = {}
+    webhook_to_squad_name = {}
     for site_name in all_sites:
         config = db.get_site_config(site_name)
         if config.get('status') != 'active':
@@ -576,6 +577,9 @@ def run_batch_processing():
         if not webhook_url:
             continue
         webhook_to_sites.setdefault(webhook_url, []).append(site_name)
+        # Guarda o nome da squad (só precisa de um, todos do mesmo webhook são da mesma squad)
+        if webhook_url not in webhook_to_squad_name:
+            webhook_to_squad_name[webhook_url] = config.get('squad_name') or site_name
     
     # Processa cada squad (webhook) - envia 1 resumo consolidado por squad
     for webhook_url, sites in webhook_to_sites.items():
@@ -777,18 +781,18 @@ def run_batch_processing():
                 
                 if send_to_slack(resumo_final, webhook_url):
                     logging.info(f"Resumo consolidado enviado para squad ({len(squad_sites_processados)} sites): ROAS {roas_str}, MC {mc_str}")
-                    squad_name = squad_sites_processados[0] if squad_sites_processados else 'Squad'
-                    db.log_activity(f"[SQUAD] {squad_name}", 'success', f"Resumo consolidado ({len(squad_sites_processados)} sites): ROAS {roas_str}, MC {mc_str}")
+                    squad_display_name = webhook_to_squad_name.get(webhook_url, 'Squad')
+                    db.log_activity(f"[SQUAD] {squad_display_name}", 'success', f"Resumo consolidado ({len(squad_sites_processados)} sites): ROAS {roas_str}, MC {mc_str}")
                 else:
                     logging.error("Falha ao enviar resumo consolidado para o Slack")
-                    squad_name = squad_sites_processados[0] if squad_sites_processados else 'Squad'
-                    db.log_activity(f"[SQUAD] {squad_name}", 'error', "Falha ao enviar resumo consolidado para o Slack")
+                    squad_display_name = webhook_to_squad_name.get(webhook_url, 'Squad')
+                    db.log_activity(f"[SQUAD] {squad_display_name}", 'error', "Falha ao enviar resumo consolidado para o Slack")
 
             except Exception as e:
                 logging.error(f"Erro ao calcular/enviar resumo consolidado: {e}")
                 send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
-                squad_name = squad_sites_processados[0] if squad_sites_processados else 'Squad'
-                db.log_activity(f"[SQUAD] {squad_name}", 'error', f"Erro ao enviar resumo consolidado: {e}")
+                squad_display_name = webhook_to_squad_name.get(webhook_url, 'Squad')
+                db.log_activity(f"[SQUAD] {squad_display_name}", 'error', f"Erro ao enviar resumo consolidado: {e}")
 
 def main():
     setup_logging()
