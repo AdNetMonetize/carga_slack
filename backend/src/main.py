@@ -1,0 +1,842 @@
+import logging
+import sys
+import os
+from typing import Dict, Any, List
+from datetime import datetime, timedelta
+import requests
+import time
+import pytz
+import random
+import argparse
+import traceback
+import schedule
+import re
+import schedule
+import time
+import pytz
+from datetime import datetime
+
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from google_sheets_processor import GoogleSheetsProcessor
+from db_manager import DBManager
+from data_manager import DataManager
+from config import (
+    GOOGLE_SHEETS_URL,
+    LOG_FILE
+)
+
+def setup_logging():
+    log_dir = os.path.dirname(LOG_FILE)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+        
+    # Limpa handlers existentes para garantir que o basicConfig funcione
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+        
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(LOG_FILE),
+            logging.StreamHandler(sys.stdout)
+        ],
+        force=True
+    )
+    logging.info("Sistema de logs inicializado.")
+
+def clean_value(val):
+    if val in [None, '', '#DIV/0!', '#N/A', '#VALUE!', '#REF!', '#NAME?']:
+        return '0,00'
+    return val
+
+def is_dollar_value(value_str):
+    value_str = str(value_str).strip()
+    return '$' in value_str and 'R$' not in value_str
+
+def extract_titles_and_fields(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    results = []
+    data = record.get('Data')
+    if record.get('FBADS 01') not in [None, '', 'R$ 0,00']:
+        results.append({
+            'titulo': 'FB ADS',
+            'mc': clean_value(record.get('MC R$')),
+            'roas': clean_value(record.get('ROAS')),
+            'data': data
+        })
+    if record.get('GADS') not in [None, '', 'R$ 0,00']:
+        results.append({
+            'titulo': 'G ADS',
+            'mc': clean_value(record.get('MC R$ .2')),
+            'roas': clean_value(record.get('ROAS .2')),
+            'data': data
+        })
+    return results
+
+
+def format_slack_message_empresa(empresa: str, data: str, blocos: list) -> list:
+    mensagens = []
+    for bloco in blocos:
+        roas = bloco.get('roas') or '**'
+        mc = bloco.get('mc') or '**'
+        if bloco['titulo'] == 'FB ADS':
+            titulo_empresa = bloco.get('FBADS 01') or 'FB ADS'
+        elif bloco['titulo'] == 'G ADS':
+            titulo_empresa = bloco.get('G-ADS') or 'G ADS'
+        else:
+            titulo_empresa = bloco['titulo']
+        msg = f"Atualização {titulo_empresa}\nROAS: {roas}\nMC: {mc}"
+        mensagens.append(msg)
+    return mensagens
+
+def get_roas_emoji(roas_value):
+    try:
+        roas_num = float(roas_value.replace(',', '.').replace('R$', '').strip())
+        if roas_num < 1:
+            return ":warning:"
+        elif roas_num < 1.5:
+            return ":moneybag:"
+        else:
+            return ":money_with_wings:"
+    except:
+        return ""
+
+def get_mc_emoji(mc_value):
+    try:
+        mc_str = str(mc_value).replace('R$', '').strip()
+        if ',' in mc_str and '.' in mc_str:
+            mc_str = mc_str.replace('.', '').replace(',', '.')
+        elif ',' in mc_str:
+            mc_str = mc_str.replace(',', '.')
+        is_negative = mc_str.startswith('-')
+        if is_negative:
+            mc_str = mc_str[1:]
+        mc_num = float(mc_str)
+        if is_negative:
+            mc_num = -mc_num
+        if mc_num < -100:
+            return ":rotating_light:"
+        elif mc_num < 0:
+            return ":warning:"
+        elif mc_num <= 100:
+            return ":moneybag:"
+        elif mc_num <= 1000:
+            return ":star-struck:"
+        else:
+            return ":money_with_wings:"
+    except Exception as e:
+        logging.error(f"Erro ao processar MC: {e}, valor: {mc_value}")
+        return ""
+
+def send_to_slack(message: str, webhook_url: str) -> bool:
+    logging.info(f"Enviando mensagem ao Slack: {message}")
+    try:
+        response = requests.post(
+            webhook_url,
+            json={"text": message},
+            headers={"Content-type": "application/json"}
+        )
+        logging.info(f"Resposta do Slack: status={response.status_code}, body={response.text}")
+        return response.status_code == 200
+    except Exception as e:
+        logging.error(f"Exceção ao enviar mensagem ao Slack: {e}")
+        return False
+
+def check_mc_alert(site_name: str, mc_value: float, db: DBManager) -> bool:
+    try:
+
+        if mc_value < -100:
+
+            cursor = db.connection.cursor(dictionary=True)
+            cursor.execute("SELECT webhook_url FROM slack_channels WHERE name = 'Alert'")
+            alert_channel = cursor.fetchone()
+            
+            if alert_channel:
+                alert_message = f":rotating_light: *{site_name}* :rotating_light:\n" \
+                              f"MC: *R$ {mc_value:,.2f}*"
+                
+                success = send_to_slack(alert_message, alert_channel['webhook_url'])
+                if success:
+                    logging.info(f"Alerta enviado para {site_name} com MC {mc_value}")
+                    return True
+                else:
+                    logging.error(f"Falha ao enviar alerta para {site_name}")
+                    return False
+            else:
+                logging.error("Canal Alert não encontrado no banco de dados")
+                return False
+        else:
+            logging.info(f"MC {mc_value} para {site_name} não requer alerta")
+            return False
+            
+    except Exception as e:
+        logging.error(f"Erro ao verificar alerta MC para {site_name}: {e}")
+        return False
+
+def get_current_date_str() -> str:
+    """Retorna a data atual no formato DD/MM.""" 
+    now = datetime.now()
+    return f"{now.day:02d}/{now.month:02d}"
+
+def get_brasilia_time_str():
+    tz = pytz.timezone('America/Sao_Paulo')
+    now = datetime.now(tz)
+    return now.strftime('%H:%M')
+
+def to_float(val):
+    if not val:
+        return 0.0
+    val = str(val)
+    match = re.search(r'-?\d+[\d.,]*', val.replace('R$', '').replace(' ', ''))
+    if not match:
+        return 0.0
+    num = match.group(0).replace('.', '').replace(',', '.')
+    try:
+        return float(num)
+    except:
+        return 0.0
+
+def process_current_date_only(sheets_url: str, site_name: str) -> None:
+    sheets_processor = GoogleSheetsProcessor(sheets_url, site_name=site_name)
+    current_date = get_current_date_str()
+    current_month = datetime.now().month
+    current_year = datetime.now().year
+    db = DBManager()
+    db.connect()
+    config = db.get_site_config(site_name)
+    logging.info(f"DEBUG: config retornado para {site_name}: {config}")
+    logging.info(f"DEBUG: webhook_url para {site_name}: {config.get('slack_webhook_url')}")
+    webhook_url = config.get('slack_webhook_url')
+    if not webhook_url:
+        logging.warning(f"Site '{site_name}' não possui webhook do Slack configurado!")
+        db.log_activity(site_name, 'error', 'Webhook do Slack não configurado')
+        return
+    sheets = sheets_processor.get_sheet_ids()
+    if not sheets:
+        return
+
+    for sheet in sheets:
+        sheet_id = sheet['id']
+        records, summary, actual_name = sheets_processor.read_data(sheet_id)
+        if not records:
+            continue
+        pagina = actual_name or sheet['name']
+        
+        aba_mes_vigente = False
+        for mes in ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]:
+            if mes in pagina:
+                mes_num = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"].index(mes) + 1
+                if mes_num == current_month and str(current_year) in pagina:
+                    aba_mes_vigente = True
+                break
+
+        if not aba_mes_vigente:
+            continue
+
+        current_record = None
+        for r in reversed(records):
+            if r.get('Data') == current_date:
+                current_record = r
+                break
+
+        if not current_record:
+            logging.warning(f"Nenhum registro encontrado para a data {current_date}")
+            db.log_activity(site_name, 'info', f"Nenhum registro encontrado para {current_date}")
+            continue
+        
+        logging.info("Data do registro encontrado: " + str(current_record.get('Data')))
+        logging.info("MC bruto da planilha: " + str(current_record.get('MC Geral')))
+        mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
+        logging.info("MC após clean_value: " + str(mc_geral))
+        logging.info("MC após to_float: " + str(to_float(mc_geral)))
+        
+
+        mc_float = to_float(mc_geral)
+        check_mc_alert(site_name, mc_float, db)
+        
+        investimento = clean_value(current_record.get('Investimento', '0,00'))
+        receita = clean_value(current_record.get('Receita', '0,00'))
+        roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
+        roas_emoji = get_roas_emoji(roas_geral)
+        mc_emoji = get_mc_emoji(mc_geral)
+            
+        hora_atual = get_brasilia_time_str()
+
+
+        try:
+            total_investimento = to_float(investimento)
+            total_receita = to_float(receita)
+            total_mc = to_float(mc_geral)
+            roas_geral_float = to_float(roas_geral)
+            
+            investimento_str = f"R$ {total_investimento:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+            receita_str = f"R$ {total_receita:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+            roas_str = f"{roas_geral_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+            mc_str = f"R$ {total_mc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+            
+            resumo_msg = [
+                f"Investimento: {investimento_str}",
+                f"Receita: {receita_str}",
+                f"ROAS: {roas_str}",
+                f"MC: {mc_str}"
+            ]
+            resumo_final = "\n".join(resumo_msg)
+            resumo_final = "\n".join(resumo_msg)
+            if send_to_slack(resumo_final, webhook_url):
+                db.log_activity(site_name, 'success', f"Resumo diário enviado: ROAS {roas_str}, MC {mc_str}")
+            else:
+                db.log_activity(site_name, 'error', "Falha ao enviar resumo para o Slack")
+        except Exception as e:
+            logging.error(f"Erro ao calcular/enviar resumo do grupo: {e}")
+            send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
+            db.log_activity(site_name, 'error', f"Erro ao processar resumo: {str(e)}")
+        
+        break 
+
+def run_monitor(sheets_url: str, site_name: str, interval_seconds: int = 10):
+    logging.info(f"Iniciando monitoramento da data atual com intervalo de {interval_seconds} segundos")
+    db = DBManager()
+    try:
+        while True:
+            process_current_date_only(sheets_url, site_name)
+            time.sleep(interval_seconds)
+    except KeyboardInterrupt:
+        logging.info("Monitoramento interrompido pelo usuário")
+        send_to_slack("Monitoramento interrompido")
+    except Exception as e:
+        logging.error(f"Erro durante o monitoramento: {e}")
+        send_to_slack(f"Erro no monitoramento: {str(e)}")
+        db.log_activity(site_name, 'error', f"Erro no monitoramento: {str(e)}")
+
+def process_all_sheets(sheets_url: str, site_name: str) -> Dict[str, int]:
+    db = DBManager()
+    db.connect()
+    sheets_processor = GoogleSheetsProcessor(sheets_url, site_name=site_name)
+    data_manager = DataManager()
+    stats = {
+        'total_sheets': 0,
+        'processadas': 0,
+        'enviadas': 0,
+        'falhas': 0
+    }
+    sheets = sheets_processor.get_sheet_ids()
+    stats['total_sheets'] = len(sheets)
+    if not sheets:
+        logging.warning("Nenhuma aba encontrada na planilha")
+        return stats
+    
+    for sheet in sheets:
+        sheet_id = sheet['id']
+        sheet_name = sheet['name']
+        logging.info(f"Processando aba: {sheet_name} (ID: {sheet_id})")
+        records, summary, actual_name = sheets_processor.read_data(sheet_id)
+        if not records:
+            logging.warning(f"Não foi possível extrair registros da aba {sheet_name}")
+            stats['falhas'] += 1
+            continue
+        
+        pagina = actual_name or sheet_name
+        empresa = pagina
+        
+        registros_por_data = {}
+        for record in records:
+            if not record.get('Data'):
+                logging.debug(f"Linha ignorada (sem Data): {record}")
+                continue
+            data = record.get('Data')
+            blocos = sheets_processor.extract_titles_and_fields(record)
+            if not blocos:
+                continue
+            
+            if data not in registros_por_data:
+                registros_por_data[data] = []
+            
+            for bloco in blocos:
+                bloco_copy = bloco.copy()
+                bloco_copy['pagina'] = pagina
+                registros_por_data[data].append(bloco_copy)
+        
+
+        config = db.get_site_config(site_name)
+        sheet_url = config['sheet_url'] if config and config.get('sheet_url') else None
+        webhook_url = config.get('slack_webhook_url')
+        logging.info(f"DEBUG: config retornado para {site_name}: {config}")
+        logging.info(f"DEBUG: webhook_url para {site_name}: {webhook_url}")
+        if not sheet_url:
+            logging.warning(f"Site '{site_name}' sem sheet_url cadastrado! Pulando...")
+            stats['falhas'] += 1
+            continue
+        if not webhook_url:
+            logging.warning(f"Site '{site_name}' sem webhook do Slack cadastrado! Pulando...")
+            db.log_activity(site_name, 'error', 'Site sem webhook configurado')
+            stats['falhas'] += 1
+            continue
+
+        for data in sorted(registros_por_data.keys()):
+            blocos = registros_por_data[data]
+            registro_id = f"{empresa}_{data}"
+            if data_manager.is_record_processed({'id': registro_id, 'titulo': empresa}, 'id'):
+                logging.info(f"Grupo já processado: {registro_id}")
+                stats['processadas'] += 1
+                continue
+            
+            mensagens = format_slack_message_empresa(empresa, data, blocos)
+            sucesso = True
+            for mensagem in mensagens:
+                logging.info(f"Preparando para enviar ao Slack: {mensagem}")
+                if not send_to_slack(mensagem, webhook_url): 
+                    sucesso = False
+                    stats['falhas'] += 1
+
+            try:
+                sheets_processor = GoogleSheetsProcessor(sheet_url, site_name=site_name)
+                current_date = get_current_date_str()
+                current_month = datetime.now().month
+                current_year = datetime.now().year
+                sheets = sheets_processor.get_sheet_ids()
+                if not sheets:
+                    continue
+                site_investimento = 0.0
+                site_receita_real = 0.0
+                site_receita_dolar = 0.0
+                site_mc = 0.0
+                encontrou_registro = False
+                roas_lidos = [] 
+                for sheet in sheets:
+                    sheet_id = sheet['id']
+                    records, summary, actual_name = sheets_processor.read_data(sheet_id)
+                    if not records:
+                        continue
+                    pagina = actual_name or sheet['name']
+                    aba_mes_vigente = False
+                    for mes in ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]:
+                        if mes in pagina:
+                            mes_num = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"].index(mes) + 1
+                            if mes_num == current_month and str(current_year) in pagina:
+                                aba_mes_vigente = True
+                            break
+                    if not aba_mes_vigente:
+                        continue
+                    logging.info(f"[DEBUG] Datas lidas na aba {pagina}: {[r.get('Data') for r in records]}")
+                    current_record = None
+                    for r in reversed(records):
+                        data_val = r.get('Data')
+                        if not data_val:
+                            continue
+                        data_val_str = str(data_val).strip()
+                        matched = False
+                        for fmt in ["%d/%m", "%d/%m/%Y", "%d/%m/%y", "%d-%m", "%d-%m-%Y", "%d-%m-%y"]:
+                            try:
+                                dt_val = datetime.strptime(re.sub(r'\\s+', '', data_val_str), fmt)
+                                dt_target = datetime.strptime(current_date, "%d/%m")
+                                if dt_val.day == dt_target.day and dt_val.month == dt_target.month:
+                                    matched = True
+                                    break
+                            except Exception:
+                                continue
+                        if not matched:
+                            try:
+                                parts = re.split(r'[/-]', data_val_str)
+                                if len(parts) >= 2:
+                                    d, m = int(parts[0]), int(parts[1])
+                                    dt_target = datetime.strptime(current_date, "%d/%m")
+                                    if d == dt_target.day and m == dt_target.month:
+                                        matched = True
+                            except Exception:
+                                pass
+                        if matched:
+                            current_record = r
+                            break
+                    if not current_record:
+                        continue
+                    encontrou_registro = True
+                    investimento = clean_value(current_record.get('Investimento', '0,00'))
+                    receita = clean_value(current_record.get('Receita', '0,00'))
+                    roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
+                    mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
+                    logging.info(f"Valores encontrados para {site_name}: Investimento={investimento}, Receita={receita}, ROAS={roas_geral}, MC={mc_geral}")
+                    
+                    # Verifica alerta de MC negativo
+                    mc_float = to_float(mc_geral)
+                    check_mc_alert(site_name, mc_float, db)
+                    
+                    is_dolar = is_dollar_value(receita)
+                    logging.info(f"[DEBUG] Receita '{receita}' detectada como {'DÓLAR' if is_dolar else 'REAL'}")
+                    
+                    site_investimento += to_float(investimento)
+                    if is_dolar:
+                        site_receita_dolar += to_float(receita)
+                    else:
+                        site_receita_real += to_float(receita)
+                    site_mc += to_float(mc_geral)
+                    site_roas = roas_geral 
+                    roas_lidos.append(to_float(roas_geral))
+                    
+                if site_investimento > 0 or site_receita_real > 0 or site_receita_dolar > 0 or encontrou_registro:
+                    roas_geral_str = site_roas
+                    
+                    if not roas_geral_str or roas_geral_str == '0,00':
+                        roas_geral_str = '0,00'
+                        
+                    roas_emoji = get_roas_emoji(roas_geral_str)
+                    mc_emoji = get_mc_emoji(str(site_mc))
+                    
+                    investimento_str = f"R$ {site_investimento:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    receita_real_str = f"R$ {site_receita_real:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.') if site_receita_real > 0 else "R$ 0,00"
+                    receita_dolar_str = f"$ {site_receita_dolar:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.') if site_receita_dolar > 0 else "$ 0,00"
+                    
+                    receipts_msg = ""
+                    if site_receita_real > 0 and site_receita_dolar > 0:
+                        receipts_msg = f"Receita (R$): *{receita_real_str}*\nReceita ($): *{receita_dolar_str}*"
+                    elif site_receita_real > 0:
+                        receipts_msg = f"Receita: *{receita_real_str}*"
+                    elif site_receita_dolar > 0:
+                        receipts_msg = f"Receita: *{receita_dolar_str}*"
+                    else:
+                        receipts_msg = "Receita: *R$ 0,00*"
+                        
+                   # msg = f":bar_chart: Atualização {site_name} {roas_emoji} {mc_emoji}\n" \
+                   #     f"Investimento: *{investimento_str}*\n" \
+                   #     f"{receipts_msg}\n" \
+                   #     f"ROAS: *{roas_geral_str}*\n" \
+                   #     f"MC: *{mc_geral}*"
+                   # send_to_slack(msg, webhook_url)
+                
+                try:
+                    total_investimento = to_float(site_investimento)
+                    total_receita_real = to_float(site_receita_real)
+                    total_receita_dolar = to_float(site_receita_dolar)
+                    total_mc = to_float(site_mc)
+                    
+                    # Calcula ROAS baseado no resumo total (mais preciso)
+                    total_receita = total_receita_real + total_receita_dolar
+                    roas_medio = total_receita / total_investimento if total_investimento > 0 else 0.0
+                    
+                    investimento_str = f"R$ {total_investimento:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    receita_real_str = f"R$ {total_receita_real:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    receita_dolar_str = f"$ {total_receita_dolar:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    mc_str = f"R$ {total_mc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    roas_str = f"{roas_medio:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                    
+                    resumo_msg = [
+                        f"Investimento: {investimento_str}",
+                        f"Receita: {receita_real_str}",
+                        f"ROAS: {roas_str}",
+                        f"MC: {mc_str}"
+                    ]
+                    resumo_final = "\n".join(resumo_msg)
+                    send_to_slack(resumo_final, webhook_url)
+                except Exception as e:
+                    send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
+                    db.log_activity(site_name, 'error', f"Erro ao enviar resumo: {e}")
+
+            except Exception as e:
+                logging.error(f"Erro ao calcular/enviar resumo do grupo: {e}")
+                send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
+                db.log_activity(site_name, 'error', f"Erro de processamento: {e}")
+
+            if sucesso:
+                data_manager.mark_as_processed({
+                    'id': registro_id, 
+                    'titulo': empresa, 
+                    'data': data, 
+                    'blocos': blocos,
+                    'data_processamento': datetime.now().isoformat()
+                }, key_field='id')
+                logging.info(f"Grupo marcado como processado: {registro_id}")
+                db.log_activity(site_name, 'success', f"Dados processados e enviados para o Slack (Data: {data})")
+                stats['enviadas'] += 1
+    
+    logging.info(f"Processamento de todas as abas concluído: {stats}")
+    return stats
+
+def exponential_backoff(attempt, max_backoff=60):
+    base_delay = min(2 ** (attempt - 1), max_backoff)
+    jitter = random.uniform(0, 0.1 * base_delay)  
+    return base_delay + jitter
+
+def run_batch_processing():
+    db = DBManager()
+    db.connect()
+    
+    all_sites = db.get_all_sites()
+    logging.info(f"Iniciando processamento da data atual ({get_current_date_str()}) para todos os sites cadastrados...")
+    
+    webhook_to_sites = {}
+    for site_name in all_sites:
+        config = db.get_site_config(site_name)
+        if config.get('status') != 'active':
+            logging.info(f"Site '{site_name}' marcado como inativo. Pulando processamento.")
+            continue
+
+        webhook_url = config.get('slack_webhook_url')
+        if not webhook_url:
+            continue
+        webhook_to_sites.setdefault(webhook_url, []).append(site_name)
+    
+    for webhook_url, sites in webhook_to_sites.items():
+        for site_name in sites:
+            retry = True
+            retry_count = 0
+            max_retries = 5
+            while retry and retry_count < max_retries:
+                try:
+                    config = db.get_site_config(site_name)
+                    sheet_url = config['sheet_url'] if config and config.get('sheet_url') else None
+                    if not sheet_url:
+                        print(f"Site '{site_name}' sem sheet_url cadastrado! Pulando...")
+                        break
+                    print(f"Processando site: {site_name} ({sheet_url})")
+                    sheets_processor = GoogleSheetsProcessor(sheet_url, site_name=site_name)
+
+                    current_date = get_current_date_str()
+                    current_month = datetime.now().month
+                    current_year = datetime.now().year
+                    
+                    sheets = None
+                    sheet_retry = 0
+                    while sheets is None and sheet_retry < 3:
+                        try:
+                            sheets = sheets_processor.get_sheet_ids()
+                            if not sheets:
+                                print(f"Nenhuma aba encontrada para {site_name}")
+                                break
+                        except Exception as e:
+                            sheet_retry += 1
+                            if 'RATE_LIMIT_EXCEEDED' in str(e) or '429' in str(e):
+                                wait_time = exponential_backoff(sheet_retry)
+                                print(f"Rate limit ao obter abas de {site_name}. Aguardando {wait_time:.2f}s (tentativa {sheet_retry}/3)")
+                                time.sleep(wait_time)
+                            else:
+                                raise
+                    
+                    if not sheets:
+                        break
+                        
+                    site_investimento = 0.0
+                    site_receita_real = 0.0
+                    site_receita_dolar = 0.0
+                    site_mc = 0.0
+                    encontrou_registro = False
+                    
+                    mes_vigente_sheets = []
+                    for sheet in sheets:
+                        sheet_name = sheet['name']
+                        for mes in ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]:
+                            if mes in sheet_name:
+                                mes_num = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"].index(mes) + 1
+                                if mes_num == current_month and str(current_year) in sheet_name:
+                                    mes_vigente_sheets.append(sheet)
+                                break
+                    
+                    if not mes_vigente_sheets and sheets:
+                        mes_vigente_sheets = [sheets[0]]
+                        print(f"Nenhuma aba do mês vigente encontrada para {site_name}. Usando a primeira aba.")
+                        
+                    for sheet in mes_vigente_sheets:
+                        sheet_id = sheet['id']
+
+                        records = None
+                        summary = None
+                        actual_name = None
+                        read_retry = 0
+                        while records is None and read_retry < 3:
+                            try:
+                                records, summary, actual_name = sheets_processor.read_data(sheet_id)
+                            except Exception as e:
+                                read_retry += 1
+                                if 'RATE_LIMIT_EXCEEDED' in str(e) or '429' in str(e):
+                                    wait_time = exponential_backoff(read_retry, max_backoff=30)
+                                    print(f"Rate limit ao ler dados de {site_name}, aba {sheet['name']}. Aguardando {wait_time:.2f}s (tentativa {read_retry}/3)")
+                                    time.sleep(wait_time)
+                                else:
+                                    logging.error(f"Erro ao ler dados de {site_name}, aba {sheet['name']}: {e}")
+                                    break
+                        
+                        if not records:
+                            print(f"Nenhum registro encontrado na aba {sheet['name']} de {site_name}")
+                            continue
+                            
+                        pagina = actual_name or sheet['name']
+                        aba_mes_vigente = True
+                        
+                        current_record = None
+                        for r in reversed(records):
+                            data_val = r.get('Data')
+                            if not data_val:
+                                continue
+                            data_val_str = str(data_val).strip()
+                            matched = False
+                            if data_val_str == current_date:
+                                matched = True
+                            else:
+                                for fmt in ["%d/%m", "%d/%m/%Y", "%d/%m/%y", "%d-%m", "%d-%m-%Y", "%d-%m-%y"]:
+                                    try:
+                                        dt_val = datetime.strptime(re.sub(r'\s+', '', data_val_str), fmt)
+                                        dt_target = datetime.strptime(current_date, "%d/%m")
+                                        if dt_val.day == dt_target.day and dt_val.month == dt_target.month:
+                                            matched = True
+                                            break
+                                    except Exception:
+                                        continue
+                                if not matched:
+                                    try:
+                                        parts = re.split(r'[/-]', data_val_str)
+                                        if len(parts) >= 2:
+                                            d, m = int(parts[0]), int(parts[1])
+                                            dt_target = datetime.strptime(current_date, "%d/%m")
+                                            if d == dt_target.day and m == dt_target.month:
+                                                matched = True
+                                    except Exception:
+                                        pass
+                            if matched:
+                                current_record = r
+                                break
+                        if not current_record:
+                            print(f"Nenhum registro encontrado para data {current_date} na aba {pagina} de {site_name}")
+                            continue
+                        encontrou_registro = True
+                        investimento = clean_value(current_record.get('Investimento', '0,00'))
+                        receita = clean_value(current_record.get('Receita', '0,00'))
+                        roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
+                        mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
+                        
+                        # Verifica alerta de MC negativo
+                        mc_float = to_float(mc_geral)
+                        check_mc_alert(site_name, mc_float, db)
+                        
+                        is_dolar = is_dollar_value(receita)
+                        
+                        site_investimento += to_float(investimento)
+                        if is_dolar:
+                            site_receita_dolar += to_float(receita)
+                        else:
+                            site_receita_real += to_float(receita)
+                        site_mc += to_float(mc_geral)
+                        site_roas = roas_geral 
+                        
+                    if site_investimento > 0 or site_receita_real > 0 or site_receita_dolar > 0 or encontrou_registro:
+                        try:
+                            total_investimento = to_float(site_investimento)
+                            total_receita_real = to_float(site_receita_real)
+                            total_receita_dolar = to_float(site_receita_dolar)
+                            total_mc = to_float(site_mc)
+                            
+                            # Calcula ROAS baseado no resumo total (mais preciso)
+                            total_receita = total_receita_real + total_receita_dolar
+                            roas_medio = total_receita / total_investimento if total_investimento > 0 else 0.0
+                            
+                            investimento_str = f"R$ {total_investimento:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                            receita_real_str = f"R$ {total_receita_real:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                            receita_dolar_str = f"$ {total_receita_dolar:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                            mc_str = f"R$ {total_mc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                            roas_str = f"{roas_medio:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                            
+                            resumo_msg = [
+                                f"Investimento: {investimento_str}",
+                                f"Receita: {receita_real_str}",
+                                f"ROAS: {roas_str}",
+                                f"MC: {mc_str}"
+                            ]
+                            resumo_final = "\n".join(resumo_msg)
+                            if send_to_slack(resumo_final, webhook_url):
+                                db.log_activity(site_name, 'success', f"Resumo diário enviado: ROAS {roas_str}, MC {mc_str}")
+                                retry = False
+                            else:
+                                db.log_activity(site_name, 'error', f"Falha ao enviar resumo para o Slack")
+                                raise Exception("Falha ao enviar Slack")
+
+                        except Exception as e:
+                             send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
+                             db.log_activity(site_name, 'error', f"Erro ao enviar resumo: {e}")
+                             raise e
+                    else:
+                        retry = False
+
+                except Exception as e:
+                    retry_count += 1
+                    wait_time = exponential_backoff(retry_count)
+                    logging.info(f"Erro ao processar {site_name}. Tentativa {retry_count}/{max_retries}. Aguardando {wait_time:.2f}s. Erro: {e}")
+                    time.sleep(wait_time)
+                    if retry_count >= max_retries:
+                         logging.error(f"Falha definitiva ao processar {site_name} após {max_retries} tentativas.")
+                         db.log_activity(site_name, 'error', f"Falha definitiva no processamento: {str(e)}")
+                         retry = False
+
+def main():
+    setup_logging()
+    os.makedirs('data', exist_ok=True)
+    db = DBManager()
+    db.connect()
+
+
+    parser = argparse.ArgumentParser(description='Processa dados do Google Sheets para Slack')
+    parser.add_argument('--site', type=str, help='Nome do site a ser processado (opcional)')
+    args = parser.parse_args()
+
+    if args.site:
+        site_name = args.site
+        config = db.get_site_config(site_name)
+        sheet_url = config['sheet_url'] if config and config.get('sheet_url') else None
+        if not sheet_url:
+            print(f"Site '{site_name}' sem sheet_url cadastrado! Abortando...")
+            return
+        print(f"Processando site: {site_name} ({sheet_url})")
+        try:
+            process_current_date_only(sheet_url, site_name)
+        except Exception as e:
+            if 'RATE_LIMIT_EXCEEDED' in str(e) or '429' in str(e):
+                print("Limite de requisições atingido. Aguardando 60 segundos antes de tentar novamente...")
+                time.sleep(60)
+                try:
+                    process_current_date_only(sheet_url, site_name)
+                except Exception as e2:
+                    print(f"Erro ao processar site {site_name} após aguardar: {e2}")
+                    print(traceback.format_exc())
+            else:
+                print(f"Erro ao processar site {site_name}: {e}")
+                print(traceback.format_exc())
+    else:
+        try:
+            run_batch_processing()
+        except KeyboardInterrupt:
+            print("\nProcessamento interrompido pelo usuário.")
+        except Exception as e:
+            print(f"Erro fatal no processamento: {e}")
+            logging.error(f"Erro fatal no processamento: {e}")
+
+if __name__ == "__main__":
+    setup_logging()
+    
+    if '--agendador' in sys.argv:
+        sys.argv.remove('--agendador')
+        def job():
+            logging.info(f"[Agendador] Iniciando rotina de processamento...")
+            try:
+                main()
+                logging.info(f"[Agendador] Rotina de processamento concluída com sucesso.")
+            except Exception as e:
+                logging.error(f"[Agendador] Erro durante a rotina: {e}")
+                logging.error(traceback.format_exc())
+
+        logging.info("Agendador iniciado. Agendamentos: 00:10, 06:10, 09:10, 12:10, 15:10, 18:10 e 21:10.")
+        for hour in [0, 6, 9, 12, 15, 18, 21]:
+            schedule.every().day.at(f"{hour:02d}:10").do(job)
+        
+        # Log de status inicial para confirmar que está rodando
+        logging.info("[Agendador] Aguardando próximo agendamento...")
+        
+        last_heartbeat = time.time()
+        while True:
+            schedule.run_pending()
+            
+            # Log de pulsação a cada 1 hora para mostrar que o container está vivo
+            if time.time() - last_heartbeat > 3600:
+                logging.info(f"[Agendador] Heartbeat - Agendador rodando. Hora atual: {datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%H:%M:%S')}")
+                last_heartbeat = time.time()
+                
+            time.sleep(1)
+    else:
+        main() 

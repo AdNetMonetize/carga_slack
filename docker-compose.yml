@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Serviço da API Backend
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: carga_slack_api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file: .env
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+      # Mount creds to ensure they are up to date without rebuild (optional, but good for dev)
+      - ./backend/google_service_account.json:/app/google_service_account.json
+
+  # Serviço do Agendador (Batch Job)
+  backend-scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: carga_slack_scheduler
+    restart: unless-stopped
+    command: python src/main.py --agendador
+    env_file: .env
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+      - ./backend/google_service_account.json:/app/google_service_account.json
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - backend-api
+
+  # Serviço do Frontend (Nginx serving React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: carga_slack_frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend-api

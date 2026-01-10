@@ -1,0 +1,6 @@
+/* Squads page styles */
+.squads-page {
+    padding: var(--space-lg);
+}
+
+/* Reuse existing global styles from globals.css */
