@@ -186,6 +186,25 @@ export default function Dashboard() {
         return result;
     }, [logs, sites]);
 
+
+
+    // Totais Gerais das Squads
+    const totalSquads = useMemo(() => {
+        const totalInv = squadsResumo.reduce((acc, curr) => acc + curr.totalInv, 0);
+        const totalRec = squadsResumo.reduce((acc, curr) => acc + curr.totalRec, 0);
+        const totalSites = squadsResumo.reduce((acc, curr) => acc + curr.sitesCount, 0);
+        const roas = totalInv > 0 ? (totalRec / totalInv).toFixed(2) : '0.00';
+        const mc = totalRec - totalInv;
+
+        return {
+            totalInv,
+            totalRec,
+            totalSites,
+            roas,
+            mc: mc.toFixed(2)
+        };
+    }, [squadsResumo]);
+
     // Helper para extrair valores numéricos das mensagens
     const parseLogValues = (log: ProcessingLog) => {
         const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
@@ -394,6 +413,66 @@ export default function Dashboard() {
                                             </span>
                                         </div>
                                     ))}
+
+                                    {/* Linha de Total Geral */}
+                                    <div style={{
+                                        marginTop: '16px',
+                                        background: 'linear-gradient(90deg, rgba(39, 174, 96, 0.1) 0%, rgba(39, 174, 96, 0.05) 100%)',
+                                        borderRadius: '12px',
+                                        padding: '14px 16px',
+                                        border: '1px solid rgba(39, 174, 96, 0.3)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '16px'
+                                    }}>
+                                        <span style={{
+                                            background: '#27ae60',
+                                            color: '#fff',
+                                            padding: '6px 12px',
+                                            borderRadius: '8px',
+                                            fontSize: '0.85em',
+                                            fontWeight: 700,
+                                            minWidth: '100px',
+                                            textAlign: 'center',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '6px'
+                                        }}>
+                                            <Trophy size={14} /> TOTAL
+                                        </span>
+                                        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', fontSize: '0.9em' }}>
+                                            <div>
+                                                <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                    <Wallet size={12} /> Investimento
+                                                </span>
+                                                <strong>R$ {totalSquads.totalInv.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            <div>
+                                                <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                    <DollarSign size={12} /> Receita
+                                                </span>
+                                                <strong style={{ color: '#27ae60' }}>R$ {totalSquads.totalRec.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            <div>
+                                                <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                    <TrendingUp size={12} /> ROAS
+                                                </span>
+                                                <strong>{totalSquads.roas}</strong>
+                                            </div>
+                                            <div>
+                                                <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                    <PieChart size={12} /> MC
+                                                </span>
+                                                <strong style={{ color: parseFloat(totalSquads.mc) >= 0 ? '#27ae60' : '#e74c3c' }}>
+                                                    R$ {parseFloat(totalSquads.mc).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </strong>
+                                            </div>
+                                        </div>
+                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.8em', fontWeight: 600 }}>
+                                            {totalSquads.totalSites} sites
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
