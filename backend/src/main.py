@@ -564,6 +564,7 @@ def run_batch_processing():
     all_sites = db.get_all_sites()
     logging.info(f"Iniciando processamento da data atual ({get_current_date_str()}) para todos os sites cadastrados...")
     
+    # Agrupa sites por webhook (squad)
     webhook_to_sites = {}
     for site_name in all_sites:
         config = db.get_site_config(site_name)
@@ -576,12 +577,27 @@ def run_batch_processing():
             continue
         webhook_to_sites.setdefault(webhook_url, []).append(site_name)
     
+    # Processa cada squad (webhook) - envia 1 resumo consolidado por squad
     for webhook_url, sites in webhook_to_sites.items():
+        # Totais consolidados da squad
+        squad_investimento = 0.0
+        squad_receita_real = 0.0
+        squad_receita_dolar = 0.0
+        squad_mc = 0.0
+        squad_encontrou_registro = False
+        squad_sites_processados = []
+        
+        current_date = get_current_date_str()
+        current_month = datetime.now().month
+        current_year = datetime.now().year
+        
+        # Processa cada site da squad e acumula os valores
         for site_name in sites:
-            retry = True
             retry_count = 0
             max_retries = 5
-            while retry and retry_count < max_retries:
+            site_processado = False
+            
+            while not site_processado and retry_count < max_retries:
                 try:
                     config = db.get_site_config(site_name)
                     sheet_url = config['sheet_url'] if config and config.get('sheet_url') else None
@@ -590,10 +606,6 @@ def run_batch_processing():
                         break
                     print(f"Processando site: {site_name} ({sheet_url})")
                     sheets_processor = GoogleSheetsProcessor(sheet_url, site_name=site_name)
-
-                    current_date = get_current_date_str()
-                    current_month = datetime.now().month
-                    current_year = datetime.now().year
                     
                     sheets = None
                     sheet_retry = 0
@@ -614,13 +626,8 @@ def run_batch_processing():
                     
                     if not sheets:
                         break
-                        
-                    site_investimento = 0.0
-                    site_receita_real = 0.0
-                    site_receita_dolar = 0.0
-                    site_mc = 0.0
-                    encontrou_registro = False
                     
+                    # Encontra abas do mês vigente
                     mes_vigente_sheets = []
                     for sheet in sheets:
                         sheet_name = sheet['name']
@@ -660,8 +667,8 @@ def run_batch_processing():
                             continue
                             
                         pagina = actual_name or sheet['name']
-                        aba_mes_vigente = True
                         
+                        # Busca registro da data atual
                         current_record = None
                         for r in reversed(records):
                             data_val = r.get('Data')
@@ -694,66 +701,34 @@ def run_batch_processing():
                             if matched:
                                 current_record = r
                                 break
+                        
                         if not current_record:
                             print(f"Nenhum registro encontrado para data {current_date} na aba {pagina} de {site_name}")
                             continue
-                        encontrou_registro = True
+                        
+                        # Extrai valores do site
                         investimento = clean_value(current_record.get('Investimento', '0,00'))
                         receita = clean_value(current_record.get('Receita', '0,00'))
-                        roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
                         mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
                         
-                        # Verifica alerta de MC negativo
+                        # Verifica alerta de MC negativo (por site individual)
                         mc_float = to_float(mc_geral)
                         check_mc_alert(site_name, mc_float, db)
                         
                         is_dolar = is_dollar_value(receita)
                         
-                        site_investimento += to_float(investimento)
+                        # Acumula nos totais da squad
+                        squad_investimento += to_float(investimento)
                         if is_dolar:
-                            site_receita_dolar += to_float(receita)
+                            squad_receita_dolar += to_float(receita)
                         else:
-                            site_receita_real += to_float(receita)
-                        site_mc += to_float(mc_geral)
-                        site_roas = roas_geral 
-                        
-                    if site_investimento > 0 or site_receita_real > 0 or site_receita_dolar > 0 or encontrou_registro:
-                        try:
-                            total_investimento = to_float(site_investimento)
-                            total_receita_real = to_float(site_receita_real)
-                            total_receita_dolar = to_float(site_receita_dolar)
-                            total_mc = to_float(site_mc)
-                            
-                            # Calcula ROAS baseado no resumo total (mais preciso)
-                            total_receita = total_receita_real + total_receita_dolar
-                            roas_medio = total_receita / total_investimento if total_investimento > 0 else 0.0
-                            
-                            investimento_str = f"R$ {total_investimento:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                            receita_real_str = f"R$ {total_receita_real:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                            receita_dolar_str = f"$ {total_receita_dolar:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                            mc_str = f"R$ {total_mc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                            roas_str = f"{roas_medio:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                            
-                            resumo_msg = [
-                                f"Investimento: {investimento_str}",
-                                f"Receita: {receita_real_str}",
-                                f"ROAS: {roas_str}",
-                                f"MC: {mc_str}"
-                            ]
-                            resumo_final = "\n".join(resumo_msg)
-                            if send_to_slack(resumo_final, webhook_url):
-                                db.log_activity(site_name, 'success', f"Resumo diário enviado: ROAS {roas_str}, MC {mc_str}")
-                                retry = False
-                            else:
-                                db.log_activity(site_name, 'error', f"Falha ao enviar resumo para o Slack")
-                                raise Exception("Falha ao enviar Slack")
-
-                        except Exception as e:
-                             send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
-                             db.log_activity(site_name, 'error', f"Erro ao enviar resumo: {e}")
-                             raise e
-                    else:
-                        retry = False
+                            squad_receita_real += to_float(receita)
+                        squad_mc += to_float(mc_geral)
+                        squad_encontrou_registro = True
+                        squad_sites_processados.append(site_name)
+                    
+                    site_processado = True
+                    db.log_activity(site_name, 'success', f"Dados coletados para resumo da squad")
 
                 except Exception as e:
                     retry_count += 1
@@ -761,9 +736,52 @@ def run_batch_processing():
                     logging.info(f"Erro ao processar {site_name}. Tentativa {retry_count}/{max_retries}. Aguardando {wait_time:.2f}s. Erro: {e}")
                     time.sleep(wait_time)
                     if retry_count >= max_retries:
-                         logging.error(f"Falha definitiva ao processar {site_name} após {max_retries} tentativas.")
-                         db.log_activity(site_name, 'error', f"Falha definitiva no processamento: {str(e)}")
-                         retry = False
+                        logging.error(f"Falha definitiva ao processar {site_name} após {max_retries} tentativas.")
+                        db.log_activity(site_name, 'error', f"Falha definitiva no processamento: {str(e)}")
+        
+        # Envia 1 mensagem consolidada por squad (após processar todos os sites)
+        if squad_encontrou_registro and (squad_investimento > 0 or squad_receita_real > 0 or squad_receita_dolar > 0):
+            try:
+                # Calcula ROAS baseado no resumo total consolidado
+                total_receita = squad_receita_real + squad_receita_dolar
+                roas_consolidado = total_receita / squad_investimento if squad_investimento > 0 else 0.0
+                
+                investimento_str = f"R$ {squad_investimento:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                receita_real_str = f"R$ {squad_receita_real:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                receita_dolar_str = f"$ {squad_receita_dolar:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                mc_str = f"R$ {squad_mc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                roas_str = f"{roas_consolidado:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+                
+                # Formata receita (mostra ambas se existirem)
+                if squad_receita_real > 0 and squad_receita_dolar > 0:
+                    receita_display = f"Receita (R$): {receita_real_str}\nReceita ($): {receita_dolar_str}"
+                elif squad_receita_dolar > 0:
+                    receita_display = f"Receita: {receita_dolar_str}"
+                else:
+                    receita_display = f"Receita: {receita_real_str}"
+                
+                resumo_msg = [
+                    f"Investimento: {investimento_str}",
+                    receita_display,
+                    f"ROAS: {roas_str}",
+                    f"MC: {mc_str}"
+                ]
+                resumo_final = "\n".join(resumo_msg)
+                
+                if send_to_slack(resumo_final, webhook_url):
+                    logging.info(f"Resumo consolidado enviado para squad ({len(squad_sites_processados)} sites): ROAS {roas_str}, MC {mc_str}")
+                    for site in squad_sites_processados:
+                        db.log_activity(site, 'success', f"Resumo consolidado enviado: ROAS {roas_str}, MC {mc_str}")
+                else:
+                    logging.error("Falha ao enviar resumo consolidado para o Slack")
+                    for site in squad_sites_processados:
+                        db.log_activity(site, 'error', "Falha ao enviar resumo consolidado para o Slack")
+
+            except Exception as e:
+                logging.error(f"Erro ao calcular/enviar resumo consolidado: {e}")
+                send_to_slack(f"Erro ao enviar resumo: {e}", webhook_url)
+                for site in squad_sites_processados:
+                    db.log_activity(site, 'error', f"Erro ao enviar resumo consolidado: {e}")
 
 def main():
     setup_logging()
