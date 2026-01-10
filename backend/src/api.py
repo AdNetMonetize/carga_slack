@@ -361,12 +361,27 @@ def get_sheet_headers():
         
         headers = all_data[header_row_index] if header_row_index < len(all_data) else []
         
+        # Busca a última linha de dados para preview
+        last_data_row = []
+        if len(all_data) > header_row_index + 1:
+            # Busca última linha não-vazia
+            for row in reversed(all_data[header_row_index + 1:]):
+                if row and any(cell.strip() for cell in row):
+                    last_data_row = row
+                    break
+        
         headers_with_index = []
         for i, header in enumerate(headers):
             if header and header.strip():
+                # Pega o valor de preview dessa coluna
+                preview_value = ''
+                if i < len(last_data_row):
+                    preview_value = last_data_row[i].strip() if last_data_row[i] else ''
+                
                 headers_with_index.append({
                     'index': i,
-                    'name': header.strip()
+                    'name': header.strip(),
+                    'preview_value': preview_value
                 })
         
         return ResponseHandler.success({

@@ -4,6 +4,7 @@ import type { Site, CreateSiteRequest, UpdateSiteRequest, ApiResponse } from '@/
 export interface SheetHeader {
     index: number;
     name: string;
+    preview_value?: string;
 }
 
 export interface SheetInfo {

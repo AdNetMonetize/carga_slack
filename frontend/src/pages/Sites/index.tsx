@@ -401,6 +401,7 @@ export function Sites() {
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 title={isViewing ? 'Detalhes do Site' : (editingSite ? 'Editar Site' : 'Novo Site')}
+                size="lg"
             >
                 <form onSubmit={handleSubmit}>
                     {currentStep === 1 ? (
@@ -485,7 +486,7 @@ export function Sites() {
                                     <option value="">Selecione a coluna...</option>
                                     {sheetHeaders.map((header) => (
                                         <option key={header.index} value={header.name}>
-                                            {header.name}
+                                            {header.name}{header.preview_value ? ` → ${header.preview_value}` : ''}
                                         </option>
                                     ))}
                                 </select>
@@ -502,7 +503,7 @@ export function Sites() {
                                     <option value="">Selecione a coluna...</option>
                                     {sheetHeaders.map((header) => (
                                         <option key={header.index} value={header.name}>
-                                            {header.name}
+                                            {header.name}{header.preview_value ? ` → ${header.preview_value}` : ''}
                                         </option>
                                     ))}
                                 </select>
@@ -519,7 +520,7 @@ export function Sites() {
                                     <option value="">Selecione a coluna...</option>
                                     {sheetHeaders.map((header) => (
                                         <option key={header.index} value={header.name}>
-                                            {header.name}
+                                            {header.name}{header.preview_value ? ` → ${header.preview_value}` : ''}
                                         </option>
                                     ))}
                                 </select>
@@ -536,7 +537,7 @@ export function Sites() {
                                     <option value="">Selecione a coluna...</option>
                                     {sheetHeaders.map((header) => (
                                         <option key={header.index} value={header.name}>
-                                            {header.name}
+                                            {header.name}{header.preview_value ? ` → ${header.preview_value}` : ''}
                                         </option>
                                     ))}
                                 </select>
