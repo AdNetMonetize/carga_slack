@@ -33,15 +33,23 @@ interface ParsedSiteData {
     receitaNum: number;
 }
 
-// Cores para squads (hash do nome para cor consistente)
-const getSquadColor = (squadName: string): string => {
-    const colors = ['#3498db', '#9b59b6', '#e74c3c', '#27ae60', '#f39c12', '#1abc9c', '#e91e63', '#00bcd4'];
-    let hash = 0;
-    for (let i = 0; i < squadName.length; i++) {
-        hash = squadName.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    return colors[Math.abs(hash) % colors.length];
-};
+// Palette de cores vibrantes e distintas
+const SQUAD_PALETTE = [
+    '#8e44ad', // Roxo
+    '#2980b9', // Azul Forte
+    '#27ae60', // Verde
+    '#d35400', // Laranja Escuro
+    '#16a085', // Turquesa
+    '#c0392b', // Vermelho
+    '#f39c12', // Amarelo/Laranja
+    '#2c3e50', // Azul Escuro
+    '#7f8c8d', // Cinza
+    '#e84393', // Rosa
+    '#00cec9', // Ciano
+    '#6c5ce7', // Roxo Azulado
+];
+
+
 
 export default function Dashboard() {
     const { user } = useAuth();
@@ -65,6 +73,20 @@ export default function Dashboard() {
         message: '',
         type: 'info'
     });
+
+    // Mapeamento dinâmico de cores por Squad
+    const squadColorMap = useMemo(() => {
+        const uniqueSquads = Array.from(new Set(sites.map(s => s.squad_name || 'Sem Squad'))).sort();
+        const map: Record<string, string> = {};
+
+        uniqueSquads.forEach((squad, index) => {
+            map[squad] = SQUAD_PALETTE[index % SQUAD_PALETTE.length];
+        });
+
+        return map;
+    }, [sites]);
+
+    const getSquadColor = (squadName: string) => squadColorMap[squadName] || '#95a5a6';
 
     useEffect(() => {
         loadData();
