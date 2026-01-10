@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { dashboardService } from '@/services/dashboard';
@@ -11,6 +11,26 @@ interface OutletContext {
     refreshKey: number;
 }
 
+interface ParsedSiteData {
+    siteName: string;
+    squadName: string;
+    investimento: string;
+    receita: string;
+    roas: string;
+    mc: string;
+    receitaNum: number;
+}
+
+// Cores para squads (hash do nome para cor consistente)
+const getSquadColor = (squadName: string): string => {
+    const colors = ['#3498db', '#9b59b6', '#e74c3c', '#27ae60', '#f39c12', '#1abc9c', '#e91e63', '#00bcd4'];
+    let hash = 0;
+    for (let i = 0; i < squadName.length; i++) {
+        hash = squadName.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+};
+
 export default function Dashboard() {
     const { user } = useAuth();
     const { refreshKey } = useOutletContext<OutletContext>();
@@ -20,6 +40,10 @@ export default function Dashboard() {
 
     const [selectedLog, setSelectedLog] = useState<ProcessingLog | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
+
+    // Ordenação
+    const [sortColumn, setSortColumn] = useState<'created_at' | 'site_name' | 'status' | 'squad' | 'inv' | 'rec' | 'roas' | 'mc'>('created_at');
+    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
     // Modal States
     const [confirmModalOpen, setConfirmModalOpen] = useState(false);
@@ -47,6 +71,104 @@ export default function Dashboard() {
         setIsLoading(false);
     };
 
+    // Extrai Top 3 faturamento dos logs
+    const top3Faturamento = useMemo(() => {
+        const siteDataMap = new Map<string, ParsedSiteData>();
+
+        logs.forEach(log => {
+            // Ignora logs de SQUAD
+            if (log.site_name.startsWith('[SQUAD]')) return;
+
+            // Parse da mensagem: "Inv: R$ X | Rec: R$ Y | ROAS: Z | MC: W"
+            const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
+            if (match) {
+                const siteName = log.site_name;
+                const inv = match[1].trim();
+                const rec = match[2].trim();
+                const roas = match[3].trim();
+                const mc = match[4].trim();
+
+                // Extrai valor numérico da receita
+                const recNum = parseFloat(rec.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+
+                // Encontra squad do site
+                const site = sites.find(s => s.name === siteName);
+                const squadName = site?.squad_name || 'Sem Squad';
+
+                // Só guarda o mais recente (primeiro encontrado, pois logs são ordenados por data desc)
+                if (!siteDataMap.has(siteName)) {
+                    siteDataMap.set(siteName, {
+                        siteName,
+                        squadName,
+                        investimento: inv,
+                        receita: rec,
+                        roas,
+                        mc,
+                        receitaNum: recNum
+                    });
+                }
+            }
+        });
+
+        // Ordena por receita e pega top 3
+        return Array.from(siteDataMap.values())
+            .sort((a, b) => b.receitaNum - a.receitaNum)
+            .slice(0, 3);
+    }, [logs, sites]);
+
+    // Helper para extrair valores numéricos das mensagens
+    const parseLogValues = (log: ProcessingLog) => {
+        const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
+        const parseNum = (val: string) => parseFloat(val.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+        return {
+            inv: match ? parseNum(match[1]) : 0,
+            rec: match ? parseNum(match[2]) : 0,
+            roas: match ? parseNum(match[3]) : 0,
+            mc: match ? parseNum(match[4]) : 0
+        };
+    };
+
+    // Logs ordenados
+    const sortedLogs = useMemo(() => {
+        return [...logs].sort((a, b) => {
+            let valA: number | string, valB: number | string;
+
+            if (sortColumn === 'created_at') {
+                valA = new Date(a.created_at).getTime();
+                valB = new Date(b.created_at).getTime();
+            } else if (sortColumn === 'site_name') {
+                valA = a.site_name.toLowerCase();
+                valB = b.site_name.toLowerCase();
+            } else if (sortColumn === 'status') {
+                valA = a.status;
+                valB = b.status;
+            } else if (sortColumn === 'squad') {
+                const siteA = sites.find(s => s.name === a.site_name);
+                const siteB = sites.find(s => s.name === b.site_name);
+                valA = (siteA?.squad_name || '').toLowerCase();
+                valB = (siteB?.squad_name || '').toLowerCase();
+            } else {
+                const valsA = parseLogValues(a);
+                const valsB = parseLogValues(b);
+                valA = valsA[sortColumn as 'inv' | 'rec' | 'roas' | 'mc'];
+                valB = valsB[sortColumn as 'inv' | 'rec' | 'roas' | 'mc'];
+            }
+
+            if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [logs, sites, sortColumn, sortDirection]);
+
+    const handleSort = (column: typeof sortColumn) => {
+        if (sortColumn === column) {
+            setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
+
     const handleManualProcessingClick = () => {
         setConfirmModalOpen(true);
     };
@@ -64,7 +186,6 @@ export default function Dashboard() {
                 message: 'O processamento foi iniciado em segundo plano. Os logs serão atualizados automaticamente conforme o progresso.',
                 type: 'success'
             });
-            // Refresh logs immediately to show any initial "Starting" log if backend adds one, or just to be ready
             loadData();
         } else {
             setInfoModal({
@@ -85,7 +206,6 @@ export default function Dashboard() {
         );
     }
 
-    // Backend doesn't return status yet, assume all returned are active
     const activeSites = sites.filter(s => s.status === 'active' || !s.status).length;
     const totalSites = sites.length;
 
@@ -151,8 +271,53 @@ export default function Dashboard() {
                 </div>
             </div>
 
+            {/* Top 3 Faturamento */}
+            {top3Faturamento.length > 0 && (
+                <div className="card" style={{ marginTop: '20px' }}>
+                    <div className="card-header">
+                        <h2>🏆 Top 3 Faturamento</h2>
+                    </div>
+                    <div className="card-body">
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                            {top3Faturamento.map((data, index) => (
+                                <div key={data.siteName} style={{
+                                    background: 'var(--bg-secondary)',
+                                    borderRadius: '12px',
+                                    padding: '16px',
+                                    border: '1px solid var(--border-color)',
+                                    position: 'relative'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <span style={{ fontSize: '1.5em' }}>{index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}</span>
+                                            <span style={{ fontWeight: 600, fontSize: '1.1em' }}>{data.siteName}</span>
+                                        </div>
+                                        <span style={{
+                                            background: getSquadColor(data.squadName),
+                                            color: '#fff',
+                                            padding: '4px 10px',
+                                            borderRadius: '12px',
+                                            fontSize: '0.75em',
+                                            fontWeight: 500
+                                        }}>
+                                            {data.squadName}
+                                        </span>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.9em' }}>
+                                        <div><span style={{ color: 'var(--text-muted)' }}>Inv:</span> {data.investimento}</div>
+                                        <div><span style={{ color: 'var(--text-muted)' }}>Rec:</span> <strong style={{ color: '#27ae60' }}>{data.receita}</strong></div>
+                                        <div><span style={{ color: 'var(--text-muted)' }}>ROAS:</span> {data.roas}</div>
+                                        <div><span style={{ color: 'var(--text-muted)' }}>MC:</span> {data.mc}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Recent Activity Logs Table */}
-            <div className="card">
+            <div className="card" style={{ marginTop: '20px' }}>
                 <div className="card-header">
                     <h2>Atividades Recentes</h2>
                 </div>
@@ -164,32 +329,89 @@ export default function Dashboard() {
                             <table className="table activity-logs-table">
                                 <thead>
                                     <tr>
-                                        <th>Data/Hora</th>
-                                        <th>Site</th>
-                                        <th>Status</th>
-                                        <th>Mensagem</th>
+                                        <th onClick={() => handleSort('created_at')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            Data {sortColumn === 'created_at' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('squad')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            Squad {sortColumn === 'squad' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('site_name')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            Site {sortColumn === 'site_name' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('inv')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            Investimento {sortColumn === 'inv' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('rec')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            Receita {sortColumn === 'rec' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('roas')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            ROAS {sortColumn === 'roas' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('mc')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            MC {sortColumn === 'mc' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('status')} style={{ cursor: 'pointer', userSelect: 'none' }}>
+                                            Status {sortColumn === 'status' && (sortDirection === 'asc' ? '↑' : '↓')}
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {logs.map((log) => (
-                                        <tr
-                                            key={log.id}
-                                            onClick={() => setSelectedLog(log)}
-                                            style={{ cursor: 'pointer', transition: 'background-color 0.2s' }}
-                                            className="log-row"
-                                        >
-                                            <td>{new Date(log.created_at).toLocaleString('pt-BR')}</td>
-                                            <td>{log.site_name}</td>
-                                            <td>
-                                                <span className={`badge badge-${log.status === 'success' ? 'success' : log.status === 'error' ? 'danger' : 'info'}`}>
-                                                    {log.status === 'success' ? 'Sucesso' : log.status === 'error' ? 'Erro' : 'Info'}
-                                                </span>
-                                            </td>
-                                            <td style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {log.message}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {sortedLogs.map((log) => {
+                                        const site = sites.find(s => s.name === log.site_name);
+                                        const squadName = site?.squad_name || (log.site_name.startsWith('[SQUAD]') ? log.site_name.replace('[SQUAD] ', '') : '');
+
+                                        // Parse mensagem: "Inv: R$ X | Rec: R$ Y | ROAS: Z | MC: W"
+                                        const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
+                                        const inv = match ? match[1].trim() : '-';
+                                        const rec = match ? match[2].trim() : '-';
+                                        const roas = match ? match[3].trim() : '-';
+                                        const mc = match ? match[4].trim() : '-';
+
+                                        // Para resumos consolidados
+                                        const isSquadSummary = log.site_name.startsWith('[SQUAD]');
+                                        const summaryMatch = log.message.match(/ROAS\s*([^,]+),\s*MC\s*(.+)/);
+
+                                        return (
+                                            <tr
+                                                key={log.id}
+                                                onClick={() => setSelectedLog(log)}
+                                                style={{
+                                                    cursor: 'pointer',
+                                                    transition: 'background-color 0.2s',
+                                                    background: isSquadSummary ? 'var(--bg-tertiary)' : undefined,
+                                                    fontWeight: isSquadSummary ? 600 : undefined
+                                                }}
+                                                className="log-row"
+                                            >
+                                                <td style={{ whiteSpace: 'nowrap' }}>{new Date(log.created_at).toLocaleString('pt-BR')}</td>
+                                                <td>
+                                                    {squadName && (
+                                                        <span style={{
+                                                            background: getSquadColor(squadName),
+                                                            color: '#fff',
+                                                            padding: '3px 8px',
+                                                            borderRadius: '10px',
+                                                            fontSize: '0.75em',
+                                                            fontWeight: 500,
+                                                            whiteSpace: 'nowrap'
+                                                        }}>
+                                                            {squadName}
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td>{isSquadSummary ? '📊 Resumo' : log.site_name}</td>
+                                                <td>{isSquadSummary ? '-' : inv}</td>
+                                                <td style={{ color: '#27ae60', fontWeight: 500 }}>{isSquadSummary ? '-' : rec}</td>
+                                                <td>{isSquadSummary && summaryMatch ? summaryMatch[1].trim() : roas}</td>
+                                                <td>{isSquadSummary && summaryMatch ? summaryMatch[2].trim() : mc}</td>
+                                                <td>
+                                                    <span className={`badge badge-${log.status === 'success' ? 'success' : log.status === 'error' ? 'danger' : 'info'}`}>
+                                                        {log.status === 'success' ? 'Sucesso' : log.status === 'error' ? 'Erro' : 'Info'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>

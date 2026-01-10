@@ -23,7 +23,11 @@ export function Sites() {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [siteToDelete, setSiteToDelete] = useState<Site | null>(null);
 
-    // Filter state
+    // Filter state - input (digitação)
+    const [filterNameInput, setFilterNameInput] = useState('');
+    const [filterSquadInput, setFilterSquadInput] = useState('');
+
+    // Filter state - aplicado
     const [filterName, setFilterName] = useState('');
     const [filterSquad, setFilterSquad] = useState('');
 
@@ -53,10 +57,7 @@ export function Sites() {
 
     useEffect(() => {
         setIsLoading(true);
-        const timer = setTimeout(() => {
-            loadSites();
-        }, 500);
-        return () => clearTimeout(timer);
+        loadSites();
     }, [refreshKey, filterName, filterSquad]);
 
     const loadSquads = async () => {
@@ -78,6 +79,11 @@ export function Sites() {
         setIsViewing(false);
         resetForm();
         setIsModalOpen(true);
+    };
+
+    const handleFilter = () => {
+        setFilterName(filterNameInput);
+        setFilterSquad(filterSquadInput);
     };
 
     const openEditModal = async (summarySite: Site) => {
@@ -296,13 +302,14 @@ export function Sites() {
                                 type="text"
                                 placeholder="Buscar por nome..."
                                 className="filter-input"
-                                value={filterName}
-                                onChange={(e) => setFilterName(e.target.value)}
+                                value={filterNameInput}
+                                onChange={(e) => setFilterNameInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleFilter()}
                             />
                             <select
                                 className="filter-input"
-                                value={filterSquad}
-                                onChange={(e) => setFilterSquad(e.target.value)}
+                                value={filterSquadInput}
+                                onChange={(e) => setFilterSquadInput(e.target.value)}
                             >
                                 <option value="">Todos os Squads</option>
                                 {squads.map((squad) => (
@@ -311,6 +318,9 @@ export function Sites() {
                                     </option>
                                 ))}
                             </select>
+                            <button className="btn btn-secondary btn-sm" onClick={handleFilter}>
+                                Filtrar
+                            </button>
                         </div>
                     </div>
                     {user?.role === 'admin' && (
