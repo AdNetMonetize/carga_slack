@@ -3,6 +3,8 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
 import logging
+import time
+import random
 
 from db_manager import DBManager
 
@@ -12,7 +14,7 @@ SCOPES = [
 ]
 
 class GoogleSheetsProcessor:
-    def __init__(self, spreadsheet_url: str, site_name: str, creds_path: str = 'google_service_account.json'):
+    def __init__(self, spreadsheet_url: str, site_name: str, creds_path: str = 'google_service_account.json', max_retries: int = 5):
         self.spreadsheet_url = spreadsheet_url
         self.creds_path = creds_path
         self.site_name = site_name
@@ -20,37 +22,52 @@ class GoogleSheetsProcessor:
         self.db_manager.connect()
         self.site_config = self.db_manager.get_site_config(site_name)
         
-        try:
-            self.creds = Credentials.from_service_account_file(
-                self.creds_path, 
-                scopes=SCOPES
-            )
-            self.gc = gspread.authorize(self.creds)
-            self.spreadsheet = self.gc.open_by_url(self.spreadsheet_url)
-            logging.info(f"Conexão com a planilha estabelecida: {self.spreadsheet.title}")
-        except Exception as e:
-            import traceback
-            error_msg = str(e)
-            error_type = type(e).__name__
-            
-            logging.error(f"Erro ao conectar à planilha - Tipo: {error_type}, Mensagem: {error_msg}")
-            logging.error(f"Traceback completo: {traceback.format_exc()}")
-            
-
-            traceback_str = traceback.format_exc()
-            
-            if "NoValidUrlKeyFound" in error_msg:
-                error_msg = "URL da planilha inválida ou malformada"
-            elif "PermissionError" in error_type or "403" in traceback_str or "does not have permission" in traceback_str:
-                error_msg = "Sem permissão para acessar a planilha. Verifique se a conta de serviço tem acesso."
-            elif "APIError" in error_type or "APIError" in traceback_str:
-                error_msg = "Erro da API do Google Sheets. Verifique permissões e quota."
-            elif not error_msg or error_msg.strip() == "":
-                error_msg = f"Erro desconhecido do tipo {error_type}"
-            
-            logging.error(f"Erro processado: {error_msg}")
-            print(f"Erro ao conectar à planilha: {error_msg}")
-            raise Exception(error_msg)
+        # Retry com exponential backoff
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                self.creds = Credentials.from_service_account_file(
+                    self.creds_path, 
+                    scopes=SCOPES
+                )
+                self.gc = gspread.authorize(self.creds)
+                self.spreadsheet = self.gc.open_by_url(self.spreadsheet_url)
+                logging.info(f"Conexão com a planilha estabelecida: {self.spreadsheet.title}")
+                return  # Sucesso, sai do construtor
+            except Exception as e:
+                last_error = e
+                import traceback
+                error_msg = str(e)
+                error_type = type(e).__name__
+                traceback_str = traceback.format_exc()
+                
+                # Verifica se é erro de rate limit ou API (retry)
+                is_retryable = ('429' in str(e) or 'RATE_LIMIT' in str(e).upper() or 
+                               'APIError' in error_type or 'APIError' in traceback_str or
+                               'quota' in str(e).lower())
+                
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    logging.warning(f"Erro ao conectar à planilha (tentativa {attempt + 1}/{max_retries}). Aguardando {wait_time:.2f}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # Erro não retryable ou última tentativa
+                logging.error(f"Erro ao conectar à planilha - Tipo: {error_type}, Mensagem: {error_msg}")
+                logging.error(f"Traceback completo: {traceback_str}")
+                
+                if "NoValidUrlKeyFound" in error_msg:
+                    error_msg = "URL da planilha inválida ou malformada"
+                elif "PermissionError" in error_type or "403" in traceback_str or "does not have permission" in traceback_str:
+                    error_msg = "Sem permissão para acessar a planilha. Verifique se a conta de serviço tem acesso."
+                elif "APIError" in error_type or "APIError" in traceback_str:
+                    error_msg = "Erro da API do Google Sheets. Verifique permissões e quota."
+                elif not error_msg or error_msg.strip() == "":
+                    error_msg = f"Erro desconhecido do tipo {error_type}"
+                
+                logging.error(f"Erro processado: {error_msg}")
+                print(f"Erro ao conectar à planilha: {error_msg}")
+                raise Exception(error_msg)
 
     def get_sheet_ids(self) -> List[Dict[str, str]]:
         try:
