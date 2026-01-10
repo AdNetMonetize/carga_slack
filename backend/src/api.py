@@ -328,7 +328,9 @@ def get_sheet_headers():
             return ResponseHandler.error('URL da planilha é obrigatória', 400)
         
         import gspread
+        import re
         from google.oauth2.service_account import Credentials
+        from datetime import datetime
         
         SCOPES = [
             'https://spreadsheets.google.com/feeds',
@@ -350,8 +352,28 @@ def get_sheet_headers():
                 'name': ws.title
             })
         
-        first_sheet = worksheets[0]
-        all_data = first_sheet.get_all_values()
+        # Busca aba do mês vigente (igual ao processamento)
+        current_month = datetime.now().month
+        current_year = datetime.now().year
+        current_date = f"{datetime.now().day:02d}/{datetime.now().month:02d}"
+        meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
+                 "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+        
+        target_sheet = None
+        for ws in worksheets:
+            for i, mes in enumerate(meses):
+                if mes in ws.title and str(current_year) in ws.title:
+                    if i + 1 == current_month:
+                        target_sheet = ws
+                        break
+            if target_sheet:
+                break
+        
+        # Se não encontrar aba do mês vigente, usa a primeira
+        if not target_sheet:
+            target_sheet = worksheets[0]
+        
+        all_data = target_sheet.get_all_values()
         
         header_row_index = 0
         for i, row in enumerate(all_data):
@@ -361,22 +383,43 @@ def get_sheet_headers():
         
         headers = all_data[header_row_index] if header_row_index < len(all_data) else []
         
-        # Busca a última linha de dados para preview
-        last_data_row = []
+        # Busca a linha do dia atual (igual ao processamento)
+        current_data_row = []
         if len(all_data) > header_row_index + 1:
-            # Busca última linha não-vazia
             for row in reversed(all_data[header_row_index + 1:]):
-                if row and any(cell.strip() for cell in row):
-                    last_data_row = row
+                if not row or not any(cell.strip() for cell in row):
+                    continue
+                data_val = row[0].strip() if row[0] else ''
+                matched = False
+                if data_val == current_date:
+                    matched = True
+                else:
+                    try:
+                        parts = re.split(r'[/-]', data_val)
+                        if len(parts) >= 2:
+                            d, m = int(parts[0]), int(parts[1])
+                            if d == datetime.now().day and m == datetime.now().month:
+                                matched = True
+                    except:
+                        pass
+                if matched:
+                    current_data_row = row
                     break
+            
+            # Se não encontrar do dia atual, usa a última linha não-vazia
+            if not current_data_row:
+                for row in reversed(all_data[header_row_index + 1:]):
+                    if row and any(cell.strip() for cell in row):
+                        current_data_row = row
+                        break
         
         headers_with_index = []
         for i, header in enumerate(headers):
             if header and header.strip():
                 # Pega o valor de preview dessa coluna
                 preview_value = ''
-                if i < len(last_data_row):
-                    preview_value = last_data_row[i].strip() if last_data_row[i] else ''
+                if i < len(current_data_row):
+                    preview_value = current_data_row[i].strip() if current_data_row[i] else ''
                 
                 headers_with_index.append({
                     'index': i,
@@ -387,7 +430,9 @@ def get_sheet_headers():
         return ResponseHandler.success({
             'sheets': sheets_info,
             'headers': headers_with_index,
-            'total_columns': len(headers)
+            'total_columns': len(headers),
+            'sheet_used': target_sheet.title,
+            'date_used': current_data_row[0] if current_data_row else 'N/A'
         })
         
     except Exception as e:
