@@ -5,6 +5,18 @@ import { dashboardService } from '@/services/dashboard';
 import { sitesService } from '@/services/sites';
 import type { Site, ProcessingLog } from '@/types';
 import { Modal } from '@/components';
+import {
+    Building2,
+    Clock,
+    Play,
+    Trophy,
+    BarChart3,
+    Users,
+    Wallet,
+    DollarSign,
+    TrendingUp,
+    PieChart
+} from 'lucide-react';
 import './Dashboard.css';
 
 interface OutletContext {
@@ -116,6 +128,64 @@ export default function Dashboard() {
             .slice(0, 3);
     }, [logs, sites]);
 
+    // Resumo por Squad
+    const squadsResumo = useMemo(() => {
+        interface SquadData {
+            squadName: string;
+            totalInv: number;
+            totalRec: number;
+            sitesCount: number;
+        }
+        const squadMap = new Map<string, SquadData>();
+
+        logs.forEach(log => {
+            // Ignora logs de SQUAD (consolidados)
+            if (log.site_name.startsWith('[SQUAD]')) return;
+
+            const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
+            if (match) {
+                const siteName = log.site_name;
+                const site = sites.find(s => s.name === siteName);
+                const squadName = site?.squad_name || 'Sem Squad';
+
+                const invNum = parseFloat(match[1].replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+                const recNum = parseFloat(match[2].replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+
+                // Só considera o log mais recente de cada site (evitar duplicação)
+                const existingSquad = squadMap.get(squadName);
+                if (!existingSquad) {
+                    squadMap.set(squadName, {
+                        squadName,
+                        totalInv: invNum,
+                        totalRec: recNum,
+                        sitesCount: 1
+                    });
+                } else {
+                    // Verifica se já contou este site
+                    const siteKey = `${squadName}-${siteName}`;
+                    if (!squadMap.has(siteKey)) {
+                        squadMap.set(siteKey, { squadName: siteKey, totalInv: 0, totalRec: 0, sitesCount: 0 }); // Marker
+                        existingSquad.totalInv += invNum;
+                        existingSquad.totalRec += recNum;
+                        existingSquad.sitesCount += 1;
+                    }
+                }
+            }
+        });
+
+        // Filtra apenas squads reais (remove markers)
+        const result = Array.from(squadMap.values())
+            .filter(s => !s.squadName.includes('-'))
+            .map(s => ({
+                ...s,
+                roas: s.totalInv > 0 ? (s.totalRec / s.totalInv).toFixed(2) : '0.00',
+                mc: (s.totalRec - s.totalInv).toFixed(2)
+            }))
+            .sort((a, b) => b.totalRec - a.totalRec);
+
+        return result;
+    }, [logs, sites]);
+
     // Helper para extrair valores numéricos das mensagens
     const parseLogValues = (log: ProcessingLog) => {
         const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
@@ -220,11 +290,7 @@ export default function Dashboard() {
                         style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
                     >
                         {isProcessing ? 'Iniciando...' : 'Executar Processamento'}
-                        {!isProcessing && (
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                            </svg>
-                        )}
+                        {!isProcessing && <Play size={16} />}
                     </button>
                 )}
             </div>
@@ -233,10 +299,7 @@ export default function Dashboard() {
             <div className="stats-grid">
                 <div className="stat-card">
                     <div className="stat-icon btc">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
-                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
-                        </svg>
+                        <Building2 size={24} />
                     </div>
                     <div className="stat-info">
                         <h3>Sites Ativos</h3>
@@ -246,10 +309,7 @@ export default function Dashboard() {
 
                 <div className="stat-card">
                     <div className="stat-icon eth">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                        </svg>
+                        <Clock size={24} />
                     </div>
                     <div className="stat-info">
                         <h3>Atividades Recentes</h3>
@@ -259,10 +319,7 @@ export default function Dashboard() {
 
                 <div className="stat-card">
                     <div className="stat-icon ltc">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
-                            <line x1="4" y1="22" x2="4" y2="15"></line>
-                        </svg>
+                        <Users size={24} />
                     </div>
                     <div className="stat-info">
                         <h3>Squads</h3>
@@ -271,48 +328,140 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* Top 3 Faturamento */}
-            {top3Faturamento.length > 0 && (
-                <div className="card" style={{ marginTop: '20px' }}>
-                    <div className="card-header">
-                        <h2>🏆 Top 3 Faturamento</h2>
-                    </div>
-                    <div className="card-body">
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-                            {top3Faturamento.map((data, index) => (
-                                <div key={data.siteName} style={{
-                                    background: 'var(--bg-secondary)',
-                                    borderRadius: '12px',
-                                    padding: '16px',
-                                    border: '1px solid var(--border-color)',
-                                    position: 'relative'
-                                }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <span style={{ fontSize: '1.5em' }}>{index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}</span>
-                                            <span style={{ fontWeight: 600, fontSize: '1.1em' }}>{data.siteName}</span>
-                                        </div>
-                                        <span style={{
-                                            background: getSquadColor(data.squadName),
-                                            color: '#fff',
-                                            padding: '4px 10px',
+            {/* Top 3 Faturamento e Resumo Squads */}
+            {(top3Faturamento.length > 0 || squadsResumo.length > 0) && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px', marginTop: '20px' }}>
+                    {/* Resumo das Squads */}
+                    {squadsResumo.length > 0 && (
+                        <div className="card">
+                            <div className="card-header">
+                                <h2><BarChart3 size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '8px' }} />Resumo das Squads</h2>
+                            </div>
+                            <div className="card-body">
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {squadsResumo.map((squad) => (
+                                        <div key={squad.squadName} style={{
+                                            background: 'var(--bg-secondary)',
                                             borderRadius: '12px',
-                                            fontSize: '0.75em',
-                                            fontWeight: 500
+                                            padding: '14px 16px',
+                                            border: '1px solid var(--border-color)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '16px'
                                         }}>
-                                            {data.squadName}
-                                        </span>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.9em' }}>
-                                        <div><span style={{ color: 'var(--text-muted)' }}>Inv:</span> {data.investimento}</div>
-                                        <div><span style={{ color: 'var(--text-muted)' }}>Rec:</span> <strong style={{ color: '#27ae60' }}>{data.receita}</strong></div>
-                                        <div><span style={{ color: 'var(--text-muted)' }}>ROAS:</span> {data.roas}</div>
-                                        <div><span style={{ color: 'var(--text-muted)' }}>MC:</span> {data.mc}</div>
-                                    </div>
+                                            <span style={{
+                                                background: getSquadColor(squad.squadName),
+                                                color: '#fff',
+                                                padding: '6px 12px',
+                                                borderRadius: '8px',
+                                                fontSize: '0.85em',
+                                                fontWeight: 600,
+                                                minWidth: '100px',
+                                                textAlign: 'center'
+                                            }}>
+                                                {squad.squadName}
+                                            </span>
+                                            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', fontSize: '0.85em' }}>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                        <Wallet size={12} /> Investimento
+                                                    </span>
+                                                    <strong>R$ {squad.totalInv.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                        <DollarSign size={12} /> Receita
+                                                    </span>
+                                                    <strong style={{ color: '#27ae60' }}>R$ {squad.totalRec.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                        <TrendingUp size={12} /> ROAS
+                                                    </span>
+                                                    <strong>{squad.roas}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8em' }}>
+                                                        <PieChart size={12} /> MC
+                                                    </span>
+                                                    <strong style={{ color: parseFloat(squad.mc) >= 0 ? '#27ae60' : '#e74c3c' }}>
+                                                        R$ {parseFloat(squad.mc).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </strong>
+                                                </div>
+                                            </div>
+                                            <span style={{ color: 'var(--text-muted)', fontSize: '0.8em' }}>
+                                                {squad.sitesCount} site{squad.sitesCount !== 1 ? 's' : ''}
+                                            </span>
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
+                            </div>
                         </div>
-                    </div>
+                    )}
+
+                    {/* Top 3 Faturamento */}
+                    {top3Faturamento.length > 0 && (
+                        <div className="card">
+                            <div className="card-header">
+                                <h2><Trophy size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '8px', color: '#f39c12' }} />Top 3 Faturamento</h2>
+                            </div>
+                            <div className="card-body">
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {top3Faturamento.map((data, index) => (
+                                        <div key={data.siteName} style={{
+                                            background: 'var(--bg-secondary)',
+                                            borderRadius: '12px',
+                                            padding: '14px 16px',
+                                            border: '1px solid var(--border-color)',
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <span style={{ fontSize: '1.3em' }}>{index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}</span>
+                                                    <span style={{ fontWeight: 600 }}>{data.siteName}</span>
+                                                </div>
+                                                <span style={{
+                                                    background: getSquadColor(data.squadName),
+                                                    color: '#fff',
+                                                    padding: '4px 10px',
+                                                    borderRadius: '12px',
+                                                    fontSize: '0.75em',
+                                                    fontWeight: 500
+                                                }}>
+                                                    {data.squadName}
+                                                </span>
+                                            </div>
+                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', fontSize: '0.85em' }}>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                        <Wallet size={12} /> Inv
+                                                    </span>
+                                                    {data.investimento}
+                                                </div>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                        <DollarSign size={12} /> Rec
+                                                    </span>
+                                                    <strong style={{ color: '#27ae60' }}>{data.receita}</strong>
+                                                </div>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                        <TrendingUp size={12} /> ROAS
+                                                    </span>
+                                                    {data.roas}
+                                                </div>
+                                                <div>
+                                                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                        <PieChart size={12} /> MC
+                                                    </span>
+                                                    {data.mc}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
