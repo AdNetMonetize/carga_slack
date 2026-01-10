@@ -41,18 +41,12 @@ class GoogleSheetsProcessor:
                 error_type = type(e).__name__
                 traceback_str = traceback.format_exc()
                 
-                # Verifica se é erro de rate limit ou API (retry)
-                is_retryable = ('429' in str(e) or 'RATE_LIMIT' in str(e).upper() or 
-                               'APIError' in error_type or 'APIError' in traceback_str or
-                               'quota' in str(e).lower())
-                
-                if is_retryable and attempt < max_retries - 1:
+                if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) + random.uniform(0, 1)
-                    logging.warning(f"Erro ao conectar à planilha (tentativa {attempt + 1}/{max_retries}). Aguardando {wait_time:.2f}s...")
+                    logging.warning(f"Erro ao conectar à planilha (tentativa {attempt + 1}/{max_retries}). Aguardando {wait_time:.2f}s... Erro: {error_msg}")
                     time.sleep(wait_time)
                     continue
                 
-                # Erro não retryable ou última tentativa
                 logging.error(f"Erro ao conectar à planilha - Tipo: {error_type}, Mensagem: {error_msg}")
                 logging.error(f"Traceback completo: {traceback_str}")
                 
