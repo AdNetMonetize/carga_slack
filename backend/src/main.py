@@ -706,7 +706,7 @@ def run_batch_processing():
                             print(f"Nenhum registro encontrado para data {current_date} na aba {pagina} de {site_name}")
                             continue
                         
-                        # Extrai valores do site
+                        # Extrai valores do site (strings originais da planilha)
                         investimento = clean_value(current_record.get('Investimento', '0,00'))
                         receita = clean_value(current_record.get('Receita', '0,00'))
                         roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
@@ -718,21 +718,14 @@ def run_batch_processing():
                         
                         is_dolar = is_dollar_value(receita)
                         
-                        # Formata valores individuais para log
+                        # Log individual do site (valores originais como string, sem conversão)
+                        db.log_activity(site_name, 'success', f"Inv: {investimento} | Rec: {receita} | ROAS: {roas_geral} | MC: {mc_geral}")
+                        
+                        # Converte para acumular nos totais da squad
                         inv_float = to_float(investimento)
                         rec_float = to_float(receita)
-                        roas_float = to_float(roas_geral)
                         mc_individual = to_float(mc_geral)
                         
-                        inv_str = f"R$ {inv_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                        rec_str = f"R$ {rec_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.') if not is_dolar else f"$ {rec_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                        roas_str = f"{roas_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                        mc_str_individual = f"R$ {mc_individual:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-                        
-                        # Log individual do site (detalhado)
-                        db.log_activity(site_name, 'success', f"Inv: {inv_str} | Rec: {rec_str} | ROAS: {roas_str} | MC: {mc_str_individual}")
-                        
-                        # Acumula nos totais da squad
                         squad_investimento += inv_float
                         if is_dolar:
                             squad_receita_dolar += rec_float
