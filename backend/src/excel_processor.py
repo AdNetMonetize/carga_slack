@@ -32,10 +32,10 @@ class ExcelProcessor:
             else:
                 df = pd.read_excel(self.file_path)
             
-            # Converte para lista de dicionários
+
             records = df.to_dict('records')
             
-            # Converte valores NaN para None
+
             clean_records = []
             for record in records:
                 clean_record = {}

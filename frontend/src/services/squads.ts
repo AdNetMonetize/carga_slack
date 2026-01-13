@@ -32,7 +32,7 @@ export const squadsService = {
     async create(data: CreateSquadRequest): Promise<Squad | null> {
         try {
             const response = await api.post<ApiResponse<Squad>>('/squads', data);
-            // Se a API retornar success: true, consideramos sucesso mesmo sem data
+
             return response.data.success ? ({} as Squad) : null;
         } catch (error) {
             console.error('Failed to create squad:', error);
@@ -43,7 +43,7 @@ export const squadsService = {
     async update(name: string, data: UpdateSquadRequest): Promise<Squad | null> {
         try {
             const response = await api.put<ApiResponse<Squad>>(`/squads/${encodeURIComponent(name)}`, data);
-            // Se a API retornar success: true, consideramos sucesso mesmo sem data
+
             return response.data.success ? ({} as Squad) : null;
         } catch (error) {
             console.error('Failed to update squad:', error);

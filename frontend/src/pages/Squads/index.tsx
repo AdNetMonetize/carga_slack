@@ -18,17 +18,17 @@ export function Squads() {
     const [editingSquad, setEditingSquad] = useState<Squad | null>(null);
     const [isViewing, setIsViewing] = useState(false);
 
-    // Form state
+
     const [formName, setFormName] = useState('');
     const [formWebhook, setFormWebhook] = useState('');
     const [formError, setFormError] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    // Delete confirmation modal
+
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [squadToDelete, setSquadToDelete] = useState<Squad | null>(null);
 
-    // Error modal
+
     const [errorModal, setErrorModal] = useState<{ open: boolean; message: string }>({
         open: false,
         message: ''

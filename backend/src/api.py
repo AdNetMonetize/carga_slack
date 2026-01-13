@@ -352,7 +352,7 @@ def get_sheet_headers():
                 'name': ws.title
             })
         
-        # Busca aba do mês vigente (igual ao processamento)
+
         current_month = datetime.now().month
         current_year = datetime.now().year
         current_date = f"{datetime.now().day:02d}/{datetime.now().month:02d}"
@@ -369,7 +369,7 @@ def get_sheet_headers():
             if target_sheet:
                 break
         
-        # Se não encontrar aba do mês vigente, usa a primeira
+
         if not target_sheet:
             target_sheet = worksheets[0]
         
@@ -383,7 +383,7 @@ def get_sheet_headers():
         
         headers = all_data[header_row_index] if header_row_index < len(all_data) else []
         
-        # Busca a linha do dia atual (igual ao processamento)
+
         current_data_row = []
         if len(all_data) > header_row_index + 1:
             for row in reversed(all_data[header_row_index + 1:]):
@@ -406,7 +406,7 @@ def get_sheet_headers():
                     current_data_row = row
                     break
             
-            # Se não encontrar do dia atual, usa a última linha não-vazia
+
             if not current_data_row:
                 for row in reversed(all_data[header_row_index + 1:]):
                     if row and any(cell.strip() for cell in row):
@@ -416,7 +416,6 @@ def get_sheet_headers():
         headers_with_index = []
         for i, header in enumerate(headers):
             if header and header.strip():
-                # Pega o valor de preview dessa coluna
                 preview_value = ''
                 if i < len(current_data_row):
                     preview_value = current_data_row[i].strip() if current_data_row[i] else ''
@@ -780,7 +779,7 @@ def update_squad(name):
     
     data = request.get_json()
     new_name = data.get('new_name', '').strip()
-    webhook_url = data.get('webhook_url', '').strip() or None
+    webhook_url = data.get('webhook_url')  # None se não enviado, string se enviado
     
     if not new_name:
         return ResponseHandler.error('Novo nome é obrigatório', 400)
@@ -790,7 +789,17 @@ def update_squad(name):
         if not conn:
             return ResponseHandler.error('Erro ao conectar ao banco de dados', 500)
         
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
+        
+
+        if webhook_url is None:
+            cursor.execute("SELECT webhook_url FROM slack_channels WHERE name = %s", (name,))
+            existing = cursor.fetchone()
+            if existing:
+                webhook_url = existing.get('webhook_url')
+        else:
+
+            webhook_url = webhook_url.strip() if webhook_url else None
         
         cursor.execute("""
             UPDATE slack_channels

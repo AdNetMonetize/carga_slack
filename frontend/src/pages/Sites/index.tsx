@@ -23,22 +23,22 @@ export function Sites() {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [siteToDelete, setSiteToDelete] = useState<Site | null>(null);
 
-    // Filter state - input (digitação)
+
     const [filterNameInput, setFilterNameInput] = useState('');
     const [filterSquadInput, setFilterSquadInput] = useState('');
 
-    // Filter state - aplicado
+
     const [filterName, setFilterName] = useState('');
     const [filterSquad, setFilterSquad] = useState('');
 
-    // Form state - Step 1
+
     const [currentStep, setCurrentStep] = useState(1);
     const [formName, setFormName] = useState('');
     const [formSpreadsheet, setFormSpreadsheet] = useState('');
     const [formSquad, setFormSquad] = useState('');
     const [formStatus, setFormStatus] = useState<'active' | 'inactive'>('active');
 
-    // Form state - Step 2 (Mapping)
+
     const [sheetHeaders, setSheetHeaders] = useState<SheetHeader[]>([]);
     const [loadingHeaders, setLoadingHeaders] = useState(false);
     const [mapping, setMapping] = useState({
@@ -97,7 +97,7 @@ export function Sites() {
     };
 
     const loadSiteDetails = async (summarySite: Site) => {
-        // Primeiro abre com os dados que já temos
+
         setEditingSite(summarySite);
         setFormName(summarySite.name);
         setFormSpreadsheet(summarySite.sheet_url || '');
@@ -107,7 +107,7 @@ export function Sites() {
         setFormError('');
         setIsModalOpen(true);
 
-        // Busca detalhes completos (incluindo índices) se tiver ID
+
         if (summarySite.id) {
             try {
                 const fullSite = await sitesService.getById(summarySite.id);
@@ -153,7 +153,7 @@ export function Sites() {
             setSheetHeaders(result.headers);
             setCurrentStep(2);
 
-            // Tenta pré-selecionar o mapeamento se estiver editando e tiver dados
+
             if (editingSite) {
                 const findHeaderName = (idx?: number) => {
                     if (idx === undefined || idx === null) return '';
@@ -161,8 +161,6 @@ export function Sites() {
                     return header ? header.name : '';
                 };
 
-                // Só atualiza se encontrar headers correspondentes, senão mantém vazio
-                // ou se os indices existem
                 if (editingSite.investimento_idx !== undefined) {
                     setMapping({
                         investimento: findHeaderName(editingSite.investimento_idx),
@@ -183,13 +181,13 @@ export function Sites() {
         e.preventDefault();
         setFormError('');
 
-        // Validações básicas
+
         if (!formName.trim()) {
             setFormError('Nome é obrigatório');
             return;
         }
 
-        // Se estiver no passo 2, validar mapeamento
+
         if (currentStep === 2) {
             if (!mapping.investimento || !mapping.receita || !mapping.roas || !mapping.mc) {
                 setFormError('Selecione todas as colunas correspondentes');
@@ -199,9 +197,7 @@ export function Sites() {
 
         setIsSaving(true);
 
-        // Encontra os índices baseado nas seleções (que guardam o nome da coluna)
-        // Se estiver no passo 1 (edição s/ remapear), assume 0 ou mantém original se backend suportar
-        // Mas como estamos forçando mapeamento na criação, vamos focar nisso
+
 
         const getIndex = (headerName: string) => {
             const header = sheetHeaders.find(h => h.name === headerName);
@@ -213,7 +209,7 @@ export function Sites() {
             sheet_url: formSpreadsheet.trim() || undefined,
             squad_name: formSquad.trim() || undefined,
             status: formStatus,
-            // Adiciona índices mapeados
+
             investimento_idx: getIndex(mapping.investimento),
             receita_idx: getIndex(mapping.receita),
             roas_idx: getIndex(mapping.roas),
@@ -261,16 +257,9 @@ export function Sites() {
         if (!site.id) return;
         const currentStatus = site.status || 'active';
         const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-        // Para toggle de status não precisamos mandar todos os dados, se o backend suportar PATCH seria ideal
-        // Como o backend usa PUT e espera tudo, vamos mandar só o status se o backend aceitar partial update, 
-        // mas o endpoint valida campos obrigatórios.
-        // O ideal é carregar o site completo antes ou backend aceitar partial.
-        // Assumindo que o update do backend valida campos required, isso pode falhar.
-        // Vamos tentar mandar o objeto site mesclado.
         const result = await sitesService.update(site.id, {
             ...site,
             status: newStatus,
-            // Garante campos required se o objeto site já os tiver
             investimento_idx: site.investimento_idx || 0,
             receita_idx: site.receita_idx || 0,
             roas_idx: site.roas_idx || 0,

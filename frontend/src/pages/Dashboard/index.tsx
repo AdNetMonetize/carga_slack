@@ -33,7 +33,7 @@ interface ParsedSiteData {
     receitaNum: number;
 }
 
-// Palette de cores vibrantes e distintas
+
 const SQUAD_PALETTE = [
     '#8e44ad', // Roxo
     '#2980b9', // Azul Forte
@@ -61,11 +61,11 @@ export default function Dashboard() {
     const [selectedLog, setSelectedLog] = useState<ProcessingLog | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
 
-    // Ordenação
+
     const [sortColumn, setSortColumn] = useState<'created_at' | 'site_name' | 'status' | 'squad' | 'inv' | 'rec' | 'roas' | 'mc'>('created_at');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-    // Modal States
+
     const [confirmModalOpen, setConfirmModalOpen] = useState(false);
     const [infoModal, setInfoModal] = useState<{ open: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({
         open: false,
@@ -74,7 +74,7 @@ export default function Dashboard() {
         type: 'info'
     });
 
-    // Mapeamento dinâmico de cores por Squad
+
     const squadColorMap = useMemo(() => {
         const uniqueSquads = Array.from(new Set(sites.map(s => s.squad_name || 'Sem Squad'))).sort();
         const map: Record<string, string> = {};
@@ -105,15 +105,15 @@ export default function Dashboard() {
         setIsLoading(false);
     };
 
-    // Extrai Top 3 faturamento dos logs
+
     const top3Faturamento = useMemo(() => {
         const siteDataMap = new Map<string, ParsedSiteData>();
 
         logs.forEach(log => {
-            // Ignora logs de SQUAD
+
             if (log.site_name.startsWith('[SQUAD]')) return;
 
-            // Parse da mensagem: "Inv: R$ X | Rec: R$ Y | ROAS: Z | MC: W"
+
             const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
             if (match) {
                 const siteName = log.site_name;
@@ -122,14 +122,14 @@ export default function Dashboard() {
                 const roas = match[3].trim();
                 const mc = match[4].trim();
 
-                // Extrai valor numérico da receita
+
                 const recNum = parseFloat(rec.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
 
-                // Encontra squad do site
+
                 const site = sites.find(s => s.name === siteName);
                 const squadName = site?.squad_name || 'Sem Squad';
 
-                // Só guarda o mais recente (primeiro encontrado, pois logs são ordenados por data desc)
+
                 if (!siteDataMap.has(siteName)) {
                     siteDataMap.set(siteName, {
                         siteName,
@@ -144,13 +144,13 @@ export default function Dashboard() {
             }
         });
 
-        // Ordena por receita e pega top 3
+
         return Array.from(siteDataMap.values())
             .sort((a, b) => b.receitaNum - a.receitaNum)
             .slice(0, 3);
     }, [logs, sites]);
 
-    // Resumo por Squad
+
     const squadsResumo = useMemo(() => {
         interface SquadData {
             squadName: string;
@@ -161,7 +161,7 @@ export default function Dashboard() {
         const squadMap = new Map<string, SquadData>();
 
         logs.forEach(log => {
-            // Ignora logs de SQUAD (consolidados)
+
             if (log.site_name.startsWith('[SQUAD]')) return;
 
             const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
@@ -173,7 +173,7 @@ export default function Dashboard() {
                 const invNum = parseFloat(match[1].replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
                 const recNum = parseFloat(match[2].replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
 
-                // Só considera o log mais recente de cada site (evitar duplicação)
+
                 const existingSquad = squadMap.get(squadName);
                 if (!existingSquad) {
                     squadMap.set(squadName, {
@@ -183,7 +183,7 @@ export default function Dashboard() {
                         sitesCount: 1
                     });
                 } else {
-                    // Verifica se já contou este site
+
                     const siteKey = `${squadName}-${siteName}`;
                     if (!squadMap.has(siteKey)) {
                         squadMap.set(siteKey, { squadName: siteKey, totalInv: 0, totalRec: 0, sitesCount: 0 }); // Marker
@@ -195,7 +195,7 @@ export default function Dashboard() {
             }
         });
 
-        // Filtra apenas squads reais (remove markers)
+
         const result = Array.from(squadMap.values())
             .filter(s => !s.squadName.includes('-'))
             .map(s => ({
@@ -210,7 +210,7 @@ export default function Dashboard() {
 
 
 
-    // Totais Gerais das Squads
+
     const totalSquads = useMemo(() => {
         const totalInv = squadsResumo.reduce((acc, curr) => acc + curr.totalInv, 0);
         const totalRec = squadsResumo.reduce((acc, curr) => acc + curr.totalRec, 0);
@@ -227,7 +227,7 @@ export default function Dashboard() {
         };
     }, [squadsResumo]);
 
-    // Helper para extrair valores numéricos das mensagens
+
     const parseLogValues = (log: ProcessingLog) => {
         const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
         const parseNum = (val: string) => parseFloat(val.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
@@ -239,7 +239,7 @@ export default function Dashboard() {
         };
     };
 
-    // Logs ordenados
+
     const sortedLogs = useMemo(() => {
         return [...logs].sort((a, b) => {
             let valA: number | string, valB: number | string;
@@ -610,14 +610,14 @@ export default function Dashboard() {
                                         const site = sites.find(s => s.name === log.site_name);
                                         const squadName = site?.squad_name || (log.site_name.startsWith('[SQUAD]') ? log.site_name.replace('[SQUAD] ', '') : '');
 
-                                        // Parse mensagem: "Inv: R$ X | Rec: R$ Y | ROAS: Z | MC: W"
+
                                         const match = log.message.match(/Inv:\s*([^|]+)\|\s*Rec:\s*([^|]+)\|\s*ROAS:\s*([^|]+)\|\s*MC:\s*(.+)/);
                                         const inv = match ? match[1].trim() : '-';
                                         const rec = match ? match[2].trim() : '-';
                                         const roas = match ? match[3].trim() : '-';
                                         const mc = match ? match[4].trim() : '-';
 
-                                        // Para resumos consolidados
+
                                         const isSquadSummary = log.site_name.startsWith('[SQUAD]');
                                         const summaryMatch = log.message.match(/ROAS\s*([^,]+),\s*MC\s*(.+)/);
 

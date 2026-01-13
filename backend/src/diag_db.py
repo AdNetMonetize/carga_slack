@@ -36,7 +36,7 @@ def check_db():
             print(f"  Hash: {hash_val[:20]}... (Is Werkzeug: {is_werkzeug})")
             print(f"  Must change password: {u['must_change_password']}")
             
-            # Test 'Cap0199**'
+
             test_pw = "Cap0199**"
             
             if is_werkzeug:

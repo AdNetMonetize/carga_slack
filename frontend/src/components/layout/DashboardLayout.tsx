@@ -23,7 +23,7 @@ export function DashboardLayout() {
             return prev + 1;
         });
 
-        // Reset refreshing state after a short delay
+
         setTimeout(() => {
             setIsRefreshing(false);
         }, 2000);
@@ -45,7 +45,7 @@ export function DashboardLayout() {
         return <Navigate to="/login" replace />;
     }
 
-    // Force password change redirect
+
     if (user?.must_change_password) {
         return <Navigate to="/login" replace />;
     }

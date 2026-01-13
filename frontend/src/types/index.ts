@@ -1,4 +1,4 @@
-// User types
+
 export interface User {
     id: number;
     username: string;
@@ -8,7 +8,7 @@ export interface User {
     updated_at?: string;
 }
 
-// Auth types
+
 export interface LoginRequest {
     username: string;
     password: string;
@@ -24,14 +24,14 @@ export interface ChangePasswordRequest {
     new_password: string;
 }
 
-// API Response types
+
 export interface ApiResponse<T = unknown> {
     success: boolean;
     data?: T;
     message?: string;
 }
 
-// Site types
+
 export interface Site {
     id?: number; // Backend might not be sending ID yet, but it should
     name: string;
@@ -39,7 +39,7 @@ export interface Site {
     squad_name?: string;
     has_webhook?: boolean;
     status?: 'active' | 'inactive';
-    // Column indices
+
     investimento_idx?: number;
     receita_idx?: number;
     roas_idx?: number;
@@ -71,7 +71,7 @@ export interface UpdateSiteRequest {
     mc_idx?: number;
 }
 
-// Dashboard types
+
 export interface DashboardStats {
     total_sites: number;
     active_sites: number;

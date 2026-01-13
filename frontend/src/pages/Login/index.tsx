@@ -11,7 +11,7 @@ export function Login() {
         user?.must_change_password ? 'changePassword' : 'login'
     );
 
-    // Login form state
+
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [remember, setRemember] = useState(false);
@@ -19,12 +19,12 @@ export function Login() {
     const [loginError, setLoginError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    // Change password form state
+
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [changePasswordError, setChangePasswordError] = useState('');
 
-    // Redirect if already authenticated and no password change needed
+
     if (isAuthenticated && !user?.must_change_password) {
         navigate('/dashboard', { replace: true });
         return null;
@@ -38,7 +38,7 @@ export function Login() {
         const success = await login(username, password, remember);
 
         if (success) {
-            // Check if user needs to change password
+
             const currentUser = JSON.parse(localStorage.getItem('carga_slack_user') || '{}');
             if (currentUser.must_change_password) {
                 setStep('changePassword');
@@ -79,7 +79,7 @@ export function Login() {
     };
 
     const handleBackToLogin = () => {
-        // Clear auth and go back to login
+
         localStorage.removeItem('carga_slack_token');
         localStorage.removeItem('carga_slack_user');
         setStep('login');

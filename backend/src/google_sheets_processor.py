@@ -22,7 +22,7 @@ class GoogleSheetsProcessor:
         self.db_manager.connect()
         self.site_config = self.db_manager.get_site_config(site_name)
         
-        # Retry com exponential backoff
+
         last_error = None
         for attempt in range(max_retries):
             try:

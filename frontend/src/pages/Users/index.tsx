@@ -20,7 +20,7 @@ export function Users() {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [userToDelete, setUserToDelete] = useState<User | null>(null);
 
-    // Form state
+
     const [formUsername, setFormUsername] = useState('');
     const [formPassword, setFormPassword] = useState('');
     const [formRole, setFormRole] = useState<'admin' | 'viewer'>('viewer');
@@ -68,7 +68,6 @@ export function Users() {
         }
 
         if (formRole === 'viewer' && !formUsername.includes('@')) {
-            // Opcional: validação básica de email se for viewer (ou sempre)
         }
 
         setIsSaving(true);

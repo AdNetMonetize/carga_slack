@@ -512,7 +512,7 @@ class DBManager:
             except Error:
                 pass
 
-            # Se falhar ou não afetar nada, tenta na tabela sites (design legado possível)
+
 
             try:
                 cursor.execute("UPDATE sites SET squad_name = %s WHERE squad_name = %s", (new_name, old_name))

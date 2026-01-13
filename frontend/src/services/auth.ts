@@ -29,7 +29,7 @@ export const authService = {
             const response = await api.post<ApiResponse>('/auth/change-password', payload);
 
             if (response.data.success) {
-                // Update local user to remove must_change_password flag
+
                 const userRaw = localStorage.getItem(USER_KEY);
                 if (userRaw) {
                     const user = JSON.parse(userRaw) as User;

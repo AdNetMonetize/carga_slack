@@ -19,7 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        // Check for existing auth on mount
+
         const storedUser = authService.getUser();
         if (storedUser && authService.isAuthenticated()) {
             setUser(storedUser);

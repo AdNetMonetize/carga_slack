@@ -32,7 +32,7 @@ def setup_logging():
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
         
-    # Limpa handlers existentes para garantir que o basicConfig funcione
+
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
         
@@ -146,34 +146,53 @@ def send_to_slack(message: str, webhook_url: str) -> bool:
 
 def check_mc_alert(site_name: str, mc_value: float, db: DBManager) -> bool:
     try:
-
-        if mc_value < -100:
-
-            cursor = db.connection.cursor(dictionary=True)
-            cursor.execute("SELECT webhook_url FROM slack_channels WHERE name = 'Alert'")
-            alert_channel = cursor.fetchone()
+        logging.info(f"[ALERT CHECK] Verificando alerta para {site_name} com MC={mc_value}")
+        
+        if mc_value <= -100:
+            logging.info(f"[ALERT CHECK] MC {mc_value} <= -100, buscando canal Alert...")
             
-            if alert_channel:
-                alert_message = f":rotating_light: *{site_name}* :rotating_light:\n" \
-                              f"MC: *R$ {mc_value:,.2f}*"
-                
-                success = send_to_slack(alert_message, alert_channel['webhook_url'])
-                if success:
-                    logging.info(f"Alerta enviado para {site_name} com MC {mc_value}")
-                    return True
-                else:
-                    logging.error(f"Falha ao enviar alerta para {site_name}")
-                    return False
-            else:
-                logging.error("Canal Alert não encontrado no banco de dados")
+            conn = db._get_connection()
+            if not conn:
+                logging.error("[ALERT CHECK] Não foi possível obter conexão do pool")
                 return False
+                
+            try:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT webhook_url FROM slack_channels WHERE name = 'Alert'")
+                alert_channel = cursor.fetchone()
+                cursor.close()
+                
+                if alert_channel:
+                    webhook_url = alert_channel.get('webhook_url', '')
+                    logging.info(f"[ALERT CHECK] Canal Alert encontrado. Webhook configurado: {bool(webhook_url)}")
+                    
+                    if not webhook_url:
+                        logging.error("[ALERT CHECK] Canal Alert existe mas webhook_url está VAZIO!")
+                        return False
+                    
+                    alert_message = f":rotating_light: *{site_name}* :rotating_light:\n" \
+                                  f"MC: *R$ {mc_value:,.2f}*"
+                    
+                    success = send_to_slack(alert_message, webhook_url)
+                    if success:
+                        logging.info(f"[ALERT CHECK] ✅ Alerta enviado com sucesso para {site_name} com MC {mc_value}")
+                        return True
+                    else:
+                        logging.error(f"[ALERT CHECK] ❌ Falha ao enviar alerta para {site_name}")
+                        return False
+                else:
+                    logging.error("[ALERT CHECK] ❌ Canal 'Alert' NÃO encontrado no banco de dados")
+                    return False
+            finally:
+                conn.close()
         else:
-            logging.info(f"MC {mc_value} para {site_name} não requer alerta")
+            logging.debug(f"[ALERT CHECK] MC {mc_value} para {site_name} não requer alerta (> -100)")
             return False
             
     except Exception as e:
-        logging.error(f"Erro ao verificar alerta MC para {site_name}: {e}")
+        logging.error(f"[ALERT CHECK] Erro ao verificar alerta MC para {site_name}: {e}")
         return False
+
 
 def get_current_date_str() -> str:
     """Retorna a data atual no formato DD/MM.""" 
@@ -458,7 +477,7 @@ def process_all_sheets(sheets_url: str, site_name: str) -> Dict[str, int]:
                     mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
                     logging.info(f"Valores encontrados para {site_name}: Investimento={investimento}, Receita={receita}, ROAS={roas_geral}, MC={mc_geral}")
                     
-                    # Verifica alerta de MC negativo
+
                     mc_float = to_float(mc_geral)
                     check_mc_alert(site_name, mc_float, db)
                     
@@ -497,12 +516,7 @@ def process_all_sheets(sheets_url: str, site_name: str) -> Dict[str, int]:
                     else:
                         receipts_msg = "Receita: *R$ 0,00*"
                         
-                   # msg = f":bar_chart: Atualização {site_name} {roas_emoji} {mc_emoji}\n" \
-                   #     f"Investimento: *{investimento_str}*\n" \
-                   #     f"{receipts_msg}\n" \
-                   #     f"ROAS: *{roas_geral_str}*\n" \
-                   #     f"MC: *{mc_geral}*"
-                   # send_to_slack(msg, webhook_url)
+
                 
                 try:
                     total_investimento = to_float(site_investimento)
@@ -510,7 +524,7 @@ def process_all_sheets(sheets_url: str, site_name: str) -> Dict[str, int]:
                     total_receita_dolar = to_float(site_receita_dolar)
                     total_mc = to_float(site_mc)
                     
-                    # Calcula ROAS baseado no resumo total (mais preciso)
+
                     total_receita = total_receita_real + total_receita_dolar
                     roas_medio = total_receita / total_investimento if total_investimento > 0 else 0.0
                     
@@ -564,7 +578,7 @@ def run_batch_processing():
     all_sites = db.get_all_sites()
     logging.info(f"Iniciando processamento da data atual ({get_current_date_str()}) para todos os sites cadastrados...")
     
-    # Agrupa sites por webhook (squad)
+
     webhook_to_sites = {}
     webhook_to_squad_name = {}
     for site_name in all_sites:
@@ -577,13 +591,13 @@ def run_batch_processing():
         if not webhook_url:
             continue
         webhook_to_sites.setdefault(webhook_url, []).append(site_name)
-        # Guarda o nome da squad (só precisa de um, todos do mesmo webhook são da mesma squad)
+
         if webhook_url not in webhook_to_squad_name:
             webhook_to_squad_name[webhook_url] = config.get('squad_name') or site_name
     
-    # Processa cada squad (webhook) - envia 1 resumo consolidado por squad
+
     for webhook_url, sites in webhook_to_sites.items():
-        # Totais consolidados da squad
+
         squad_investimento = 0.0
         squad_receita_real = 0.0
         squad_receita_dolar = 0.0
@@ -595,7 +609,7 @@ def run_batch_processing():
         current_month = datetime.now().month
         current_year = datetime.now().year
         
-        # Processa cada site da squad e acumula os valores
+
         for site_name in sites:
             retry_count = 0
             max_retries = 5
@@ -631,7 +645,7 @@ def run_batch_processing():
                     if not sheets:
                         break
                     
-                    # Encontra abas do mês vigente
+
                     mes_vigente_sheets = []
                     for sheet in sheets:
                         sheet_name = sheet['name']
@@ -672,7 +686,7 @@ def run_batch_processing():
                             
                         pagina = actual_name or sheet['name']
                         
-                        # Busca registro da data atual
+
                         current_record = None
                         for r in reversed(records):
                             data_val = r.get('Data')
@@ -710,22 +724,22 @@ def run_batch_processing():
                             print(f"Nenhum registro encontrado para data {current_date} na aba {pagina} de {site_name}")
                             continue
                         
-                        # Extrai valores do site (strings originais da planilha)
+
                         investimento = clean_value(current_record.get('Investimento', '0,00'))
                         receita = clean_value(current_record.get('Receita', '0,00'))
                         roas_geral = clean_value(current_record.get('ROAS Geral', '0,00'))
                         mc_geral = clean_value(current_record.get('MC Geral', '0,00'))
                         
-                        # Verifica alerta de MC negativo (por site individual)
+
                         mc_float = to_float(mc_geral)
                         check_mc_alert(site_name, mc_float, db)
                         
                         is_dolar = is_dollar_value(receita)
                         
-                        # Log individual do site (valores originais como string, sem conversão)
+
                         db.log_activity(site_name, 'success', f"Inv: {investimento} | Rec: {receita} | ROAS: {roas_geral} | MC: {mc_geral}")
                         
-                        # Converte para acumular nos totais da squad
+
                         inv_float = to_float(investimento)
                         rec_float = to_float(receita)
                         mc_individual = to_float(mc_geral)
@@ -750,10 +764,10 @@ def run_batch_processing():
                         logging.error(f"Falha definitiva ao processar {site_name} após {max_retries} tentativas.")
                         db.log_activity(site_name, 'error', f"Falha definitiva no processamento: {str(e)}")
         
-        # Envia 1 mensagem consolidada por squad (após processar todos os sites)
+
         if squad_encontrou_registro and (squad_investimento > 0 or squad_receita_real > 0 or squad_receita_dolar > 0):
             try:
-                # Calcula ROAS baseado no resumo total consolidado
+
                 total_receita = squad_receita_real + squad_receita_dolar
                 roas_consolidado = total_receita / squad_investimento if squad_investimento > 0 else 0.0
                 
@@ -763,7 +777,7 @@ def run_batch_processing():
                 mc_str = f"R$ {squad_mc:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
                 roas_str = f"{roas_consolidado:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
                 
-                # Formata receita (mostra ambas se existirem)
+
                 if squad_receita_real > 0 and squad_receita_dolar > 0:
                     receita_display = f"Receita (R$): {receita_real_str}\nReceita ($): {receita_dolar_str}"
                 elif squad_receita_dolar > 0:
@@ -854,14 +868,12 @@ if __name__ == "__main__":
         for hour in [0, 6, 9, 12, 15, 18, 21]:
             schedule.every().day.at(f"{hour:02d}:10").do(job)
         
-        # Log de status inicial para confirmar que está rodando
         logging.info("[Agendador] Aguardando próximo agendamento...")
         
         last_heartbeat = time.time()
         while True:
             schedule.run_pending()
             
-            # Log de pulsação a cada 1 hora para mostrar que o container está vivo
             if time.time() - last_heartbeat > 3600:
                 logging.info(f"[Agendador] Heartbeat - Agendador rodando. Hora atual: {datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%H:%M:%S')}")
                 last_heartbeat = time.time()

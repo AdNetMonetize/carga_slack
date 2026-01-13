@@ -71,18 +71,16 @@ class AuthManager:
         if not password_hash:
             return False
             
-        # Se o hash parece ser do werkzeug (formato scrypt: ou pbkdf2:sha256: etc)
+
         if password_hash.startswith(('scrypt:', 'pbkdf2:sha256:', 'pbkdf2:sha512:')):
             return check_password_hash(password_hash, password)
         
-        # Fallback para o método antigo (SHA256 com JWT_SECRET como salt)
+
         salt = JWT_SECRET[:16]
         old_hash = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
         if old_hash == password_hash:
             return True
             
-        # Tentativa de fallback com o salt padrão 'change-this-secret-key-in-production' 
-        # caso o usuário tenha sido criado em um ambiente com esse segredo
         fallback_salt = 'change-this-secret-key-in-production'[:16]
         fallback_hash = hashlib.sha256(f"{fallback_salt}{password}".encode()).hexdigest()
         return fallback_hash == password_hash
@@ -149,7 +147,7 @@ class AuthManager:
                 return None
             
             logging.info(f"Usuário '{username}' logado com sucesso.")
-            # Se logou com sucesso mas o hash ainda é o antigo, vamos atualizar para o novo formato
+
             if not user['password_hash'].startswith(('scrypt:', 'pbkdf2:sha256:', 'pbkdf2:sha512:')):
                 new_hash = self._hash_password(password)
                 try:
