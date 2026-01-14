@@ -122,8 +122,8 @@ export default function Dashboard() {
                 const roas = match[3].trim();
                 const mc = match[4].trim();
 
-
-                const recNum = parseFloat(rec.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+                const mcNum = parseFloat(mc.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+                //const recNum = parseFloat(rec.replace(/[R$\s.]/g, '').replace(',', '.')) || 0; -> backup
 
 
                 const site = sites.find(s => s.name === siteName);
@@ -138,7 +138,8 @@ export default function Dashboard() {
                         receita: rec,
                         roas,
                         mc,
-                        receitaNum: recNum
+                        //receitaNum: recNum - > backup
+                        mcNum: mcNum
                     });
                 }
             }
@@ -146,7 +147,8 @@ export default function Dashboard() {
 
 
         return Array.from(siteDataMap.values())
-            .sort((a, b) => b.receitaNum - a.receitaNum)
+            //.sort((a, b) => b.receitaNum - a.receitaNum) -> backup
+            .sort((a, b) => b.mcNum - a.mcNum)
             .slice(0, 3);
     }, [logs, sites]);
 
