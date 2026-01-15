@@ -31,6 +31,7 @@ interface ParsedSiteData {
     roas: string;
     mc: string;
     receitaNum: number;
+    mcNum: number;
 }
 
 
