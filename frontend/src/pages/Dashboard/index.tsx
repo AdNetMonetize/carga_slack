@@ -30,7 +30,7 @@ interface ParsedSiteData {
     receita: string;
     roas: string;
     mc: string;
-    receitaNum: number;
+    //receitaNum: number;
     mcNum: number; //linha nova
     
 }
