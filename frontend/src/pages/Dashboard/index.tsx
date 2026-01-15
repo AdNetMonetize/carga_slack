@@ -122,9 +122,10 @@ export default function Dashboard() {
                 const rec = match[2].trim();
                 const roas = match[3].trim();
                 const mc = match[4].trim();
-
-                const mcNum = parseFloat(mc.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+                
                 //const recNum = parseFloat(rec.replace(/[R$\s.]/g, '').replace(',', '.')) || 0; -> backup
+                const mcNum = parseFloat(mc.replace(/[R$\s.]/g, '').replace(',', '.')) || 0;
+                
 
 
                 const site = sites.find(s => s.name === siteName);
