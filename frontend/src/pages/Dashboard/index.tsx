@@ -16,7 +16,7 @@ import {
     DollarSign,
     TrendingUp,
     PieChart
-} from 'lucide-react';
+} from 'lucide-react'; 
 import './Dashboard.css';
 
 interface OutletContext {
