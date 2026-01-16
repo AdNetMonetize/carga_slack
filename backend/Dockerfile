@@ -5,6 +5,7 @@ WORKDIR /app
 # Instalar dependências do sistema necessárias para compilar pacotes python se necessário
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

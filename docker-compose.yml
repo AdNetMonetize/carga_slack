@@ -11,6 +11,9 @@ services:
     ports:
       - "5000:5000"
     env_file: .env
+    environment:
+      - TZ=America/Sao_Paulo
+
     volumes:
       - ./backend/data:/app/data
       - ./backend/logs:/app/logs
@@ -32,6 +35,8 @@ services:
       - ./backend/google_service_account.json:/app/google_service_account.json
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=America/Sao_Paulo
+
     depends_on:
       - backend-api
 
@@ -44,5 +49,8 @@ services:
     restart: unless-stopped
     ports:
       - "8080:80"
+    environment:
+      - TZ=America/Sao_Paulo
+
     depends_on:
       - backend-api
