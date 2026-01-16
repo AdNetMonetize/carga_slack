@@ -855,7 +855,6 @@ if __name__ == "__main__":
     
     if '--agendador' in sys.argv:
         sys.argv.remove('--agendador')
-
         def job():
             logging.info(f"[Agendador] Iniciando rotina de processamento...")
             try:
@@ -865,28 +864,21 @@ if __name__ == "__main__":
                 logging.error(f"[Agendador] Erro durante a rotina: {e}")
                 logging.error(traceback.format_exc())
 
-        # Horários reais de Brasília
-        target_hours = [3, 6, 9, 12, 15, 18, 21]
-        logging.info("Agendador iniciado. Agendamentos: 03:10, 06:10, 09:10, 12:10, 15:10, 18:10 e 21:10 (horário Brasília).")
-
-        # Ajuste de +3h para compensar fuso do container
-        for hour in target_hours:
-            adjusted_hour = (hour + 3) % 24
-            schedule.every().day.at(f"{adjusted_hour:02d}:10").do(job)
-            logging.info(f"[Agendador] Brasília {hour:02d}:10 → Container {adjusted_hour:02d}:10")
-
+        logging.info("Agendador iniciado. Agendamentos: 00:10, 06:10, 09:10, 12:10, 15:10, 18:10 e 21:10.")
+        for hour in [0, 6, 9, 12, 15, 18, 21]:
+            schedule.every().day.at(f"{hour:02d}:10").do(job)
+        
         logging.info("[Agendador] Aguardando próximo agendamento...")
-
+        
         last_heartbeat = time.time()
         while True:
             schedule.run_pending()
+            
             if time.time() - last_heartbeat > 3600:
-                logging.info(
-                    f"[Agendador] Heartbeat - Agendador rodando. Hora atual: "
-                    f"{datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%H:%M:%S')}"
-                )
+                logging.info(f"[Agendador] Heartbeat - Agendador rodando. Hora atual: {datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%H:%M:%S')}")
                 last_heartbeat = time.time()
+                
             time.sleep(1)
     else:
-        main()
+        main() 
 
