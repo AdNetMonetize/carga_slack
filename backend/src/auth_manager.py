@@ -1,9 +1,9 @@
 
-
 import os
 import hashlib
 import secrets
 import logging
+import jwt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
@@ -39,7 +39,8 @@ class AuthManager:
                 password_hash VARCHAR(255) NOT NULL,
                 role ENUM('admin', 'viewer') DEFAULT 'viewer',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                must_change_password BOOLEAN DEFAULT FALSE
             )
             """)
             conn.commit()
@@ -78,48 +79,38 @@ class AuthManager:
 
         salt = JWT_SECRET[:16]
         old_hash = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-        if old_hash == password_hash:
-            return True
-            
-        fallback_salt = 'change-this-secret-key-in-production'[:16]
-        fallback_hash = hashlib.sha256(f"{fallback_salt}{password}".encode()).hexdigest()
-        return fallback_hash == password_hash
+        return old_hash == password_hash
     
     def _generate_token(self, user_id: int, username: str, role: str, expiry_seconds: int = None) -> str:
         if expiry_seconds is None:
             expiry_seconds = int(TOKEN_EXPIRY_HOURS * 3600)
             
-        timestamp = int(datetime.now().timestamp())
-        expiry = int((datetime.now() + timedelta(seconds=expiry_seconds)).timestamp())
-        data = f"{user_id}:{username}:{role}:{expiry}"
-        signature = hashlib.sha256(f"{data}:{JWT_SECRET}".encode()).hexdigest()[:32]
-        return f"{data}:{signature}"
+        payload = {
+            'user_id': user_id,
+            'username': username,
+            'role': role,
+            'exp': datetime.utcnow() + timedelta(seconds=expiry_seconds),
+            'iat': datetime.utcnow()
+        }
+        
+        return jwt.encode(payload, JWT_SECRET, algorithm='HS256')
     
     def _verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         try:
-            parts = token.split(':')
-            if len(parts) != 5:
-                return None
-            
-            user_id, username, role, expiry, signature = parts
-            
-
-            if int(expiry) < int(datetime.now().timestamp()):
-                return None
-            
-
-            data = f"{user_id}:{username}:{role}:{expiry}"
-            expected_sig = hashlib.sha256(f"{data}:{JWT_SECRET}".encode()).hexdigest()[:32]
-            
-            if signature != expected_sig:
-                return None
-            
+            payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
             return {
-                'user_id': int(user_id),
-                'username': username,
-                'role': role
+                'user_id': payload['user_id'],
+                'username': payload['username'],
+                'role': payload['role']
             }
-        except Exception:
+        except jwt.ExpiredSignatureError:
+            logging.warning("Token JWT expirado")
+            return None
+        except jwt.InvalidTokenError as e:
+            logging.warning(f"Token JWT inválido: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"Erro ao verificar token JWT: {e}")
             return None
     
     def login(self, username: str, password: str, remember_me: bool = False) -> Optional[Dict[str, Any]]:

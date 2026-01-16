@@ -864,9 +864,9 @@ if __name__ == "__main__":
                 logging.error(f"[Agendador] Erro durante a rotina: {e}")
                 logging.error(traceback.format_exc())
 
-        logging.info("Agendador iniciado. Agendamentos: 00:10, 06:10, 09:10, 12:10, 15:10, 18:10 e 21:10.")
+        logging.info("Agendador iniciado. Agendamentos: a cada 2 dias em: 00:10, 06:10, 09:10, 12:10, 15:10, 18:10 e 21:10.")
         for hour in [0, 6, 9, 12, 15, 18, 21]:
-            schedule.every().day.at(f"{hour:02d}:10").do(job)
+            schedule.every(2).days.at(f"{hour:02d}:10").do(job)
         
         logging.info("[Agendador] Aguardando próximo agendamento...")
         
